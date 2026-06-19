@@ -1,0 +1,34 @@
+pub mod registry;
+pub mod scraper;
+pub mod ytdlp;
+
+use std::pin::Pin;
+
+use async_trait::async_trait;
+use tokio::io::AsyncRead;
+
+pub type MediaReader = Pin<Box<dyn AsyncRead + Send>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaKind {
+    Video,
+    Photo,
+    Audio,
+    File,
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaMeta {
+    pub filename: String,
+    pub mime_type: String,
+    pub size: u64,
+    pub duration_secs: Option<u32>,
+    pub dims: Option<(i32, i32)>,
+    pub kind: MediaKind,
+}
+
+#[async_trait]
+pub trait Provider: Send + Sync {
+    fn can_handle(&self, url: &str) -> bool;
+    async fn resolve(&self, url: &str) -> anyhow::Result<(MediaMeta, MediaReader)>;
+}
