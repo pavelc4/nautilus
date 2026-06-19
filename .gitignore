@@ -1,1 +1,6 @@
 /target
+.env
+/data
+
+# dev artifacts
+.skills/
