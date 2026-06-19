@@ -4,3 +4,22 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+tokio = { version = "1", features = ["full"] }
+grammers-client = { git = "https://codeberg.org/Lonami/grammers.git" }
+grammers-session = { git = "https://codeberg.org/Lonami/grammers.git", features = ["sqlite-storage"] }
+grammers-mtsender = { git = "https://codeberg.org/Lonami/grammers.git" }
+envy = "0.4"
+dotenvy = "0.15"
+serde = { version = "1", features = ["derive"] }
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dashmap = "6"
+tokio-util = { version = "0.7", features = ["io"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+anyhow = "1"
+thiserror = "2"
+rand = "0.8"
+pin-project = "1"
+num_cpus = "1"
+tokio-stream = "0.1"
