@@ -25,10 +25,17 @@ pub struct MediaMeta {
     pub duration_secs: Option<u32>,
     pub dims: Option<(i32, i32)>,
     pub kind: MediaKind,
+    pub title: Option<String>,
+    pub description: Option<String>,
+}
+
+pub struct MediaItem {
+    pub meta: MediaMeta,
+    pub reader: MediaReader,
 }
 
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn can_handle(&self, url: &str) -> bool;
-    async fn resolve(&self, url: &str) -> anyhow::Result<(MediaMeta, MediaReader)>;
+    async fn resolve(&self, url: &str) -> anyhow::Result<Vec<MediaItem>>;
 }

@@ -44,7 +44,7 @@ impl BotStats {
         self.processed_fail.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn bot_username(&self) -> &str { &self.bot_username }
+    pub fn bot_username(&self) -> &str { &self.bot_username }
     fn bot_id(&self) -> i64 { self.bot_id }
     fn processed_total(&self) -> u64 { self.processed_total.load(Ordering::Relaxed) }
     fn processed_ok(&self) -> u64 { self.processed_ok.load(Ordering::Relaxed) }

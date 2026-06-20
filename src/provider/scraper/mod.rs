@@ -1,8 +1,9 @@
 pub mod extractors;
+pub mod helpers;
 
 use async_trait::async_trait;
 
-use crate::provider::{MediaMeta, MediaReader, Provider};
+use crate::provider::{MediaItem, Provider};
 
 #[async_trait]
 pub trait Extractor: Send + Sync {
@@ -10,7 +11,7 @@ pub trait Extractor: Send + Sync {
     async fn resolve(
         &self,
         url: &str,
-    ) -> anyhow::Result<(MediaMeta, MediaReader)>;
+    ) -> anyhow::Result<Vec<MediaItem>>;
 }
 
 pub struct ScraperProvider {
@@ -32,7 +33,7 @@ impl Provider for ScraperProvider {
     async fn resolve(
         &self,
         url: &str,
-    ) -> anyhow::Result<(MediaMeta, MediaReader)> {
+    ) -> anyhow::Result<Vec<MediaItem>> {
         let extractor = self
             .extractors
             .iter()

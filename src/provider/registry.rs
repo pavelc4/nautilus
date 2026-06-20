@@ -1,4 +1,4 @@
-use crate::provider::{MediaMeta, MediaReader, Provider};
+use crate::provider::{MediaItem, Provider};
 
 pub struct ProviderRegistry {
     providers: Vec<Box<dyn Provider>>,
@@ -17,7 +17,7 @@ impl ProviderRegistry {
             .ok_or_else(|| anyhow::anyhow!("unsupported URL: {url}"))
     }
 
-    pub async fn resolve_and_fetch(&self, url: &str) -> anyhow::Result<(MediaMeta, MediaReader)> {
+    pub async fn resolve_and_fetch(&self, url: &str) -> anyhow::Result<Vec<MediaItem>> {
         let provider = self.resolve(url)?;
         provider.resolve(url).await
     }

@@ -1,3 +1,23 @@
-// Platform-specific extractors.
-// Each file implements Extractor for a single social-media platform.
-// Supported platforms: TikTok, Instagram, Twitter/X, etc.
+pub mod capcut;
+pub mod instagram;
+pub mod linkedin;
+pub mod pinterest;
+pub mod reddit;
+pub mod soundcloud;
+pub mod spotify;
+pub mod terabox;
+pub mod threads;
+pub mod tiktok;
+pub mod twitter;
+
+pub use capcut::CapCutExtractor;
+pub use instagram::InstagramExtractor;
+pub use linkedin::LinkedInExtractor;
+pub use pinterest::PinterestExtractor;
+pub use reddit::RedditExtractor;
+pub use soundcloud::SoundCloudExtractor;
+pub use spotify::SpotifyExtractor;
+pub use terabox::TeraboxExtractor;
+pub use threads::ThreadsExtractor;
+pub use tiktok::TikTokExtractor;
+pub use twitter::TwitterExtractor;

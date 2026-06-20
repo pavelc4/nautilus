@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use crate::provider::{MediaKind, MediaMeta, MediaReader, Provider};
+use crate::provider::{MediaItem, MediaKind, MediaMeta, MediaReader, Provider};
 
 pub struct YtDlpProvider {
     cookies: Option<String>,
@@ -34,7 +34,7 @@ impl Provider for YtDlpProvider {
             || url.contains("inv.nadeko.net")
     }
 
-    async fn resolve(&self, url: &str) -> anyhow::Result<(MediaMeta, MediaReader)> {
+    async fn resolve(&self, url: &str) -> anyhow::Result<Vec<MediaItem>> {
         let mut probe = self.build_command(&[
             "--print",
             "%(filesize,filesize_approx)s",
@@ -94,10 +94,12 @@ impl Provider for YtDlpProvider {
             duration_secs,
             dims,
             kind,
+            title: None,
+            description: None,
         };
 
         let stream = self.stream(url).await?;
-        Ok((meta, stream))
+        Ok(vec![MediaItem { meta, reader: stream }])
     }
 }
 

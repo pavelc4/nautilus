@@ -8,6 +8,7 @@ pub struct Config {
     pub owner_id: i64,
 
     pub ytdlp_cookies: Option<String>,
+    pub instagram_cookies: Option<String>,
 
     pub max_file_size_mb: Option<u64>,
     pub rate_limit_tokens: Option<u64>,
