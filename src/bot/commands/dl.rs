@@ -422,30 +422,19 @@ pub async fn handle_dl(
 
 fn detect_platform(url: &str) -> Option<&'static str> {
     let lower = url.to_lowercase();
-    if lower.contains("facebook.com") || lower.contains("fb.watch") || lower.contains("fb.com") {
-        Some("Facebook")
-    } else if lower.contains("instagram.com") || lower.contains("instagr.am") {
-        Some("Instagram")
-    } else if lower.contains("tiktok.com") {
-        Some("TikTok")
-    } else if lower.contains("twitter.com") || lower.contains("x.com") {
-        Some("Twitter")
-    } else if lower.contains("youtube.com") || lower.contains("youtu.be") {
-        Some("YouTube")
-    } else if lower.contains("pinterest.com") || lower.contains("pin.it") {
-        Some("Pinterest")
-    } else if lower.contains("linkedin.com") {
-        Some("LinkedIn")
-    } else if lower.contains("soundcloud.com") {
-        Some("SoundCloud")
-    } else if lower.contains("spotify.com") {
-        Some("Spotify")
-    } else if lower.contains("threads.com") || lower.contains("threads.net") {
-        Some("Threads")
-    } else if lower.contains("terabox.com") || lower.contains("1024terabox.com") {
-        Some("TeraBox")
-    } else {
-        None
+    match () {
+        _ if lower.contains("facebook.com") || lower.contains("fb.watch") || lower.contains("fb.com") => Some("Facebook"),
+        _ if lower.contains("instagram.com") || lower.contains("instagr.am") => Some("Instagram"),
+        _ if lower.contains("tiktok.com") => Some("TikTok"),
+        _ if lower.contains("twitter.com") || lower.contains("x.com") => Some("Twitter"),
+        _ if lower.contains("youtube.com") || lower.contains("youtu.be") => Some("YouTube"),
+        _ if lower.contains("pinterest.com") || lower.contains("pin.it") => Some("Pinterest"),
+        _ if lower.contains("linkedin.com") => Some("LinkedIn"),
+        _ if lower.contains("soundcloud.com") => Some("SoundCloud"),
+        _ if lower.contains("spotify.com") => Some("Spotify"),
+        _ if lower.contains("threads.com") || lower.contains("threads.net") => Some("Threads"),
+        _ if lower.contains("terabox.com") || lower.contains("1024terabox.com") => Some("TeraBox"),
+        _ => None,
     }
 }
 

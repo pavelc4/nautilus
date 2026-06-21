@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use grammers_client::client::UpdatesConfiguration;
-use grammers_client::update::Update;
 use grammers_client::message::InputMessage;
+use grammers_client::update::Update;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::app::AppState;
@@ -56,101 +56,104 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
         Update::NewMessage(msg) => handle_message(state, msg).await,
         Update::CallbackQuery(query) => {
             let data = String::from_utf8_lossy(query.data()).to_string();
-            if data.starts_with("dl:") {
-                let parts: Vec<&str> = data.split(':').collect();
-                if parts.len() == 3 {
-                    let format = parts[1].to_string();
-                    let id = parts[2].to_string();
+            match () {
+                _ if data.starts_with("dl:") => {
+                    let parts: Vec<&str> = data.split(':').collect();
+                    match parts.as_slice() {
+                        [_, format, id] => {
+                            let url_opt = state.pending_downloads.get(*id).map(|r| r.value().clone());
+                            match url_opt {
+                                Some(url) => {
+                                    let _ = query.answer().send().await;
 
-                    let url_opt = state.pending_downloads.get(&id).map(|r| r.value().clone());
-                    if let Some(url) = url_opt {
-                        let _ = query.answer().send().await;
+                                    if let Ok(Some(chat_ref)) = query.peer_ref().await {
+                                        if let grammers_client::tl::enums::Update::BotCallbackQuery(update) =
+                                            &query.raw
+                                        {
+                                            let _ = state
+                                                .client
+                                                .delete_messages(chat_ref, &[update.msg_id])
+                                                .await;
+                                        }
+                                    }
 
-                        if let Ok(Some(chat_ref)) = query.peer_ref().await {
-                            if let grammers_client::tl::enums::Update::BotCallbackQuery(update) =
-                                &query.raw
-                            {
-                                let _ = state
-                                    .client
-                                    .delete_messages(chat_ref, &[update.msg_id])
-                                    .await;
-                            }
-                        }
+                                    match *format {
+                                        "cancel" => {
+                                            state.pending_downloads.remove(*id);
+                                        }
+                                        _ => {
+                                            if let Ok(Some(chat_ref)) = query.peer_ref().await {
+                                                let state = state.clone();
+                                                let format_clone = format.to_string();
+                                                let id_clone = id.to_string();
 
-                        if format == "cancel" {
-                            state.pending_downloads.remove(&id);
-                        } else {
-                            if let Ok(Some(chat_ref)) = query.peer_ref().await {
-                                let state = state.clone();
-                                let format_clone = format.clone();
-                                let id_clone = id.clone();
+                                                let sender_name = match query.sender() {
+                                                    Some(grammers_client::peer::Peer::User(user)) => {
+                                                        match user.username() {
+                                                            Some(username) => Some(format!("@{}", username)),
+                                                            None => {
+                                                                let first_name = user.first_name().unwrap_or("User");
+                                                                let escaped_first = html_escape(first_name);
+                                                                let user_id = user.id().bare_id_unchecked();
+                                                                Some(format!(
+                                                                    "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
+                                                                ))
+                                                            }
+                                                        }
+                                                    }
+                                                    _ => None,
+                                                };
 
-                                let sender_name = if let Some(sender) = query.sender() {
-                                    match sender {
-                                        grammers_client::peer::Peer::User(user) => {
-                                            if let Some(username) = user.username() {
-                                                Some(format!("@{}", username))
-                                            } else {
-                                                let first_name = user.first_name().unwrap_or("User");
-                                                let escaped_first = html_escape(first_name);
-                                                let user_id = user.id().bare_id_unchecked();
-                                                Some(format!(
-                                                    "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
-                                                ))
+                                                tokio::spawn(async move {
+                                                    state.pending_downloads.remove(&id_clone);
+                                                    if let Err(e) = commands::dl::handle_dl(
+                                                        &state.client,
+                                                        chat_ref,
+                                                        &url,
+                                                        Some(&format_clone),
+                                                        &state,
+                                                        sender_name,
+                                                    )
+                                                    .await
+                                                    {
+                                                        tracing::error!("Failed download callback: {e:#}");
+                                                    }
+                                                });
                                             }
                                         }
-                                        _ => None,
                                     }
-                                } else {
-                                    None
-                                };
-
-                                tokio::spawn(async move {
-                                    state.pending_downloads.remove(&id_clone);
-                                    if let Err(e) = commands::dl::handle_dl(
-                                        &state.client,
-                                        chat_ref,
-                                        &url,
-                                        Some(&format_clone),
-                                        &state,
-                                        sender_name,
-                                    )
-                                    .await
-                                    {
-                                        tracing::error!("Failed download callback: {e:#}");
-                                    }
-                                });
+                                }
+                                None => {
+                                    let _ = query
+                                        .answer()
+                                        .alert("Download request expired or invalid.")
+                                        .send()
+                                        .await;
+                                }
                             }
                         }
-                    } else {
-                        let _ = query
-                            .answer()
-                            .alert("Download request expired or invalid.")
-                            .send()
-                            .await;
+                        _ => {}
                     }
                 }
-            } else if data == "cmd:start"
-                || data == "cmd:help"
-                || data == "cmd:about"
-            {
-                let _ = query.answer().send().await;
-                if let Ok(Some(chat_ref)) = query.peer_ref().await {
-                    if let grammers_client::tl::enums::Update::BotCallbackQuery(update) = &query.raw
-                    {
-                        let reply = match data.as_str() {
-                            "cmd:start" => commands::start::cmd_start_msg(),
-                            "cmd:help" => commands::help::cmd_help(),
-                            "cmd:about" => commands::about::cmd_about(),
-                            _ => unreachable!(),
-                        };
+                _ if data == "cmd:start" || data == "cmd:help" || data == "cmd:about" => {
+                    let _ = query.answer().send().await;
+                    if let Ok(Some(chat_ref)) = query.peer_ref().await {
+                        if let grammers_client::tl::enums::Update::BotCallbackQuery(update) = &query.raw {
+                            let reply = match data.as_str() {
+                                "cmd:start" => commands::start::cmd_start_msg(),
+                                "cmd:help" => commands::help::cmd_help(),
+                                "cmd:about" => commands::about::cmd_about(),
+                                _ => unreachable!(),
+                            };
 
-                        let _ = state
-                            .client
-                            .edit_message(chat_ref, update.msg_id, reply)
-                            .await;
+                            let _ = state
+                                .client
+                                .edit_message(chat_ref, update.msg_id, reply)
+                                .await;
+                        }
                     }
                 }
+                _ => {}
             }
             Ok(())
         }
@@ -317,15 +320,7 @@ async fn handle_message(
     }
 
     let whitelist = [
-        "/dl",
-        "/l",
-        "/mp",
-        "/audio",
-        "/start",
-        "/stats",
-        "/check",
-        "/help",
-        "/about",
+        "/dl", "/l", "/mp", "/audio", "/start", "/stats", "/check", "/speedtest", "/help", "/about",
     ];
     if !is_for_me || !whitelist.contains(&cmd) {
         return Ok(());
@@ -354,23 +349,43 @@ async fn handle_message(
             } else {
                 let text = "⚠️ <b>Usage:</b> <code>/dl &lt;url&gt;</code> or <code>/l &lt;url&gt;</code>\n\
                             Example: <code>/dl https://tiktok.com/...</code>";
-                state.client.send_message(chat, InputMessage::new().html(text)).await?;
+                state
+                    .client
+                    .send_message(chat, InputMessage::new().html(text))
+                    .await?;
             }
         }
         "/mp" | "/audio" => {
             if !args.is_empty() {
                 tracing::info!(sender = sender_id, url = args, "audio download requested");
-                commands::dl::handle_dl(&state.client, chat, args, Some("audio"), state, sender_name)
-                    .await?;
+                commands::dl::handle_dl(
+                    &state.client,
+                    chat,
+                    args,
+                    Some("audio"),
+                    state,
+                    sender_name,
+                )
+                .await?;
             } else {
                 let text = "⚠️ <b>Usage:</b> <code>/mp &lt;url&gt;</code> or <code>/audio &lt;url&gt;</code>\n\
                             Example: <code>/mp https://youtube.com/...</code>";
-                state.client.send_message(chat, InputMessage::new().html(text)).await?;
+                state
+                    .client
+                    .send_message(chat, InputMessage::new().html(text))
+                    .await?;
             }
         }
         "/stats" => {
-            let reply = commands::stats::cmd_stats(state, &state.client).await?;
-            state.client.send_message(chat, reply).await?;
+            if sender_id == state.config.owner_id {
+                let reply = commands::stats::cmd_stats(state, &state.client).await?;
+                state.client.send_message(chat, reply).await?;
+            } else {
+                state
+                    .client
+                    .send_message(chat, "Permission denied.")
+                    .await?;
+            }
         }
         "/start" => {
             commands::start::cmd_start(&state.client, chat).await?;
@@ -384,8 +399,39 @@ async fn handle_message(
             state.client.send_message(chat, reply).await?;
         }
         "/check" => {
-            let reply = commands::check::cmd_check(state).await?;
-            state.client.send_message(chat, reply).await?;
+            if sender_id == state.config.owner_id {
+                let reply = commands::check::cmd_check(state).await?;
+                state.client.send_message(chat, reply).await?;
+            } else {
+                state
+                    .client
+                    .send_message(chat, "Permission denied.")
+                    .await?;
+            }
+        }
+        "/speedtest" => {
+            if sender_id == state.config.owner_id {
+                let status_msg = state
+                    .client
+                    .send_message(chat, "Running speedtest (this may take up to 6 seconds)...")
+                    .await?;
+                match commands::speedtest::cmd_speedtest().await {
+                    Ok(reply) => {
+                        let _ = state.client.edit_message(chat, status_msg.id(), reply).await;
+                    }
+                    Err(e) => {
+                        let _ = state
+                            .client
+                            .edit_message(chat, status_msg.id(), format!("Speedtest failed: {e}"))
+                            .await;
+                    }
+                }
+            } else {
+                state
+                    .client
+                    .send_message(chat, "Permission denied.")
+                    .await?;
+            }
         }
         _ => {}
     }

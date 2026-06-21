@@ -3,7 +3,6 @@ use std::sync::Arc;
 use grammers_client::Client;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::bot::settings::SettingsMap;
 use crate::bot::status::BotStats;
 use crate::config::Config;
 use crate::provider::astra::AstraProvider;
@@ -22,7 +21,6 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub registry: Arc<ProviderRegistry>,
     pub bot_stats: BotStats,
-    pub settings: SettingsMap,
     pub pending_downloads: Arc<dashmap::DashMap<String, String>>,
     pub media_cache: Arc<dashmap::DashMap<String, CachedMedia>>,
 }
@@ -56,7 +54,6 @@ impl AppState {
             config,
             registry,
             bot_stats: BotStats::new(session.bot_username, session.bot_id),
-            settings: SettingsMap::new(),
             pending_downloads: Arc::new(dashmap::DashMap::new()),
             media_cache: Arc::new(dashmap::DashMap::new()),
         });

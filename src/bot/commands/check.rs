@@ -22,9 +22,12 @@ struct AstraHealthCookies {
     facebook: bool,
 }
 
-pub async fn cmd_check(_state: &Arc<AppState>) -> anyhow::Result<InputMessage> {
-    let api_url = std::env::var("ASTRA_API_URL")
-        .unwrap_or_else(|_| "http://localhost:3000".to_string());
+pub async fn cmd_check(state: &Arc<AppState>) -> anyhow::Result<InputMessage> {
+    let api_url = state
+        .config
+        .astra_api_url
+        .as_deref()
+        .unwrap_or("http://localhost:3000");
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
@@ -55,29 +58,27 @@ pub async fn cmd_check(_state: &Arc<AppState>) -> anyhow::Result<InputMessage> {
         _ => (false, false, false, "offline".to_string(), "offline".to_string()),
     };
 
-    let api_status = if api_online {
-        format!("Online (Go {go_ver})")
-    } else {
-        "Offline (Connection error)".to_string()
+    let api_status = match (api_online, &go_ver[..]) {
+        (true, ver) => format!("Online (Go {ver})"),
+        (false, _) => "Offline (Connection error)".to_string(),
     };
 
-    let ig_status = if !api_online {
-        "Offline"
-    } else if ig_loaded {
-        "Loaded"
-    } else {
-        "Missing / Expired"
+    let ig_status = match (api_online, ig_loaded) {
+        (false, _) => "Offline",
+        (true, true) => "Loaded",
+        (true, false) => "Missing / Expired",
     };
 
-    let fb_status = if !api_online {
-        "Offline"
-    } else if fb_loaded {
-        "Loaded"
-    } else {
-        "Missing / Expired"
+    let fb_status = match (api_online, fb_loaded) {
+        (false, _) => "Offline",
+        (true, true) => "Loaded",
+        (true, false) => "Missing / Expired",
     };
 
-    let platform_status = if api_online { "Operational" } else { "Offline" };
+    let platform_status = match api_online {
+        true => "Operational",
+        false => "Offline",
+    };
 
     let text = format!(
         "Nautilus Diagnostics & Platform Status\n\n\

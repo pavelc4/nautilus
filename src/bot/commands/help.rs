@@ -10,6 +10,7 @@ pub fn cmd_help() -> InputMessage {
                 • /audio <code>&lt;link&gt;</code> - Download audio format only.\n\
                 • /stats - Check bot status, cache hits, and server health.\n\
                 • /check - Run platform diagnostics and cookies health check.\n\
+                • /speedtest - Run download and upload speed test from Cloudflare.\n\
                 • /about - Read about the project tech stack and links.\n\
                 • /help - Display this commands guide.\n\n\
                 ✨ <b>Supported Platforms:</b>\n\
