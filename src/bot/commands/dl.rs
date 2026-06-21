@@ -45,6 +45,23 @@ fn normalize_url(url: &str) -> String {
     clean.as_str().to_string()
 }
 
+struct JobGuard {
+    state: Arc<AppState>,
+}
+
+impl JobGuard {
+    fn new(state: Arc<AppState>) -> Self {
+        state.bot_stats.incr_active_jobs();
+        Self { state }
+    }
+}
+
+impl Drop for JobGuard {
+    fn drop(&mut self) {
+        self.state.bot_stats.decr_active_jobs();
+    }
+}
+
 pub async fn handle_dl(
     client: &Client,
     chat: PeerRef,
@@ -52,6 +69,7 @@ pub async fn handle_dl(
     format: Option<&str>,
     state: &Arc<AppState>,
 ) -> anyhow::Result<()> {
+    let _guard = JobGuard::new(state.clone());
     let url = normalize_url(url);
 
     let status_msg = client
@@ -154,13 +172,6 @@ pub async fn handle_dl(
             )
             .await;
 
-        let permit = state
-            .job_semaphore
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| anyhow::anyhow!("failed to acquire job permit"))?;
-
         let uploaded = match streaming::upload_media(
             client,
             chat,
@@ -168,7 +179,6 @@ pub async fn handle_dl(
             item.meta.clone(),
             item.reader,
             &state.config,
-            permit,
         )
         .await
         {

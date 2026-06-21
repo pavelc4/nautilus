@@ -19,7 +19,6 @@ pub async fn upload_media(
     meta: MediaMeta,
     reader: MediaReader,
     config: &Config,
-    _permit: tokio::sync::OwnedSemaphorePermit,
 ) -> anyhow::Result<grammers_client::media::Uploaded> {
     let (mut progress_reader, byte_counter) = ProgressReader::new(reader);
 

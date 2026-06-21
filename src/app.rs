@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use grammers_client::Client;
-use tokio::sync::Semaphore;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::bot::settings::SettingsMap;
@@ -14,8 +13,6 @@ pub struct AppState {
     pub client: Client,
     pub config: Arc<Config>,
     pub registry: Arc<ProviderRegistry>,
-    pub job_semaphore: Arc<Semaphore>,
-    pub max_concurrent_jobs: usize,
     pub bot_stats: BotStats,
     pub settings: SettingsMap,
     pub pending_downloads: Arc<dashmap::DashMap<String, String>>,
@@ -40,11 +37,8 @@ impl AppState {
 
         let registry = Arc::new(ProviderRegistry::new(vec![Box::new(astra)]));
 
-        let max_jobs = config.max_concurrent_jobs();
-        let job_semaphore = Arc::new(Semaphore::new(max_jobs));
-
         tracing::info!(
-            "app initialized: max_jobs={max_jobs}, max_file_size={}",
+            "app initialized: max_file_size={}",
             config.max_file_size_bytes()
         );
 
@@ -52,8 +46,6 @@ impl AppState {
             client: session.client,
             config,
             registry,
-            job_semaphore,
-            max_concurrent_jobs: max_jobs,
             bot_stats: BotStats::new(session.bot_username, session.bot_id),
             settings: SettingsMap::new(),
             pending_downloads: Arc::new(dashmap::DashMap::new()),

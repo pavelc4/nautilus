@@ -9,6 +9,7 @@ pub struct BotStats {
     processed_total: AtomicU64,
     processed_ok: AtomicU64,
     processed_fail: AtomicU64,
+    active_jobs: AtomicU64,
 }
 
 impl BotStats {
@@ -20,6 +21,7 @@ impl BotStats {
             processed_total: AtomicU64::new(0),
             processed_ok: AtomicU64::new(0),
             processed_fail: AtomicU64::new(0),
+            active_jobs: AtomicU64::new(0),
         }
     }
 
@@ -37,6 +39,18 @@ impl BotStats {
         self.processed_fail.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn incr_active_jobs(&self) {
+        self.active_jobs.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn decr_active_jobs(&self) {
+        let _ = self
+            .active_jobs
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
+                Some(val.saturating_sub(1))
+            });
+    }
+
     pub fn bot_username(&self) -> &str {
         &self.bot_username
     }
@@ -51,5 +65,8 @@ impl BotStats {
     }
     pub fn processed_fail(&self) -> u64 {
         self.processed_fail.load(Ordering::Relaxed)
+    }
+    pub fn active_jobs(&self) -> u64 {
+        self.active_jobs.load(Ordering::Relaxed)
     }
 }

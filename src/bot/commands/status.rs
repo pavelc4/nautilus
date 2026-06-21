@@ -302,8 +302,7 @@ pub async fn cmd_status(state: &Arc<AppState>, client: &Client) -> anyhow::Resul
     };
 
     let ncpus = num_cpus::get();
-    let active_jobs = state.max_concurrent_jobs - state.job_semaphore.available_permits();
-    let max_jobs = state.max_concurrent_jobs;
+    let active_jobs = state.bot_stats.active_jobs();
 
     let processed = stats.processed_total();
     let ok = stats.processed_ok();
@@ -337,7 +336,7 @@ pub async fn cmd_status(state: &Arc<AppState>, client: &Client) -> anyhow::Resul
         \u{251c} Processed: {processed}\n\
         \u{2502}  \u{251c} OK: {ok}\n\
         \u{2502}  \u{2514} Failed: {fail}\n\
-        \u{251c} Active: {active_jobs} / {max_jobs}\n\
+        \u{251c} Active: {active_jobs}\n\
         \u{2514} Handler errors: {fail}\n\
         Metrics:\n\
         \u{251c} Downloads: {processed}\n\

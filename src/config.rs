@@ -13,7 +13,6 @@ pub struct Config {
 
     pub max_file_size_mb: Option<u64>,
     pub progress_edit_secs: Option<u64>,
-    pub max_concurrent_jobs: Option<usize>,
 }
 
 impl Config {
@@ -28,10 +27,5 @@ impl Config {
 
     pub fn progress_edit_secs(&self) -> u64 {
         self.progress_edit_secs.unwrap_or(3)
-    }
-
-    pub fn max_concurrent_jobs(&self) -> usize {
-        self.max_concurrent_jobs
-            .unwrap_or_else(|| num_cpus::get().clamp(1, 4))
     }
 }
