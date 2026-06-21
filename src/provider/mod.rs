@@ -28,6 +28,13 @@ pub struct MediaMeta {
     pub description: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct MediaMetadataInfo {
+    pub has_video: bool,
+    pub has_audio: bool,
+    pub has_photo: bool,
+}
+
 pub struct MediaItem {
     pub meta: MediaMeta,
     pub reader: MediaReader,
@@ -36,5 +43,6 @@ pub struct MediaItem {
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn can_handle(&self, url: &str) -> bool;
-    async fn resolve(&self, url: &str) -> anyhow::Result<Vec<MediaItem>>;
+    async fn resolve(&self, url: &str, format: Option<&str>) -> anyhow::Result<Vec<MediaItem>>;
+    async fn fetch_metadata(&self, url: &str) -> anyhow::Result<MediaMetadataInfo>;
 }

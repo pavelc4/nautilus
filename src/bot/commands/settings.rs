@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use grammers_client::message::InputMessage;
 use crate::app::AppState;
+use grammers_client::message::InputMessage;
+use std::sync::Arc;
 
 pub fn cmd_settings(state: &Arc<AppState>, user_id: i64, args: &str) -> InputMessage {
     let (cmd, val) = args.trim().split_once(' ').unwrap_or((args.trim(), ""));

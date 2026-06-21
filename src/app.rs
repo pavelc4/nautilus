@@ -18,6 +18,7 @@ pub struct AppState {
     pub max_concurrent_jobs: usize,
     pub bot_stats: BotStats,
     pub settings: SettingsMap,
+    pub pending_downloads: Arc<dashmap::DashMap<String, String>>,
 }
 
 impl AppState {
@@ -55,6 +56,7 @@ impl AppState {
             max_concurrent_jobs: max_jobs,
             bot_stats: BotStats::new(session.bot_username, session.bot_id),
             settings: SettingsMap::new(),
+            pending_downloads: Arc::new(dashmap::DashMap::new()),
         });
 
         Ok((state, session.updates_rx))

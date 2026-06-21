@@ -53,6 +53,63 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
     match update {
         Update::NewMessage(msg) if msg.outgoing() => Ok(()),
         Update::NewMessage(msg) => handle_message(state, msg).await,
+        Update::CallbackQuery(query) => {
+            let data = String::from_utf8_lossy(query.data()).to_string();
+            if data.starts_with("dl:") {
+                let parts: Vec<&str> = data.split(':').collect();
+                if parts.len() == 3 {
+                    let format = parts[1].to_string();
+                    let id = parts[2].to_string();
+
+                    let url_opt = state.pending_downloads.get(&id).map(|r| r.value().clone());
+                    if let Some(url) = url_opt {
+                        let _ = query.answer().send().await;
+
+                        if let Ok(Some(chat_ref)) = query.peer_ref().await {
+                            if let grammers_client::tl::enums::Update::BotCallbackQuery(update) =
+                                &query.raw
+                            {
+                                let _ = state
+                                    .client
+                                    .delete_messages(chat_ref, &[update.msg_id])
+                                    .await;
+                            }
+                        }
+
+                        if format == "cancel" {
+                            state.pending_downloads.remove(&id);
+                        } else {
+                            if let Ok(Some(chat_ref)) = query.peer_ref().await {
+                                let state = state.clone();
+                                let format_clone = format.clone();
+                                let id_clone = id.clone();
+                                tokio::spawn(async move {
+                                    state.pending_downloads.remove(&id_clone);
+                                    if let Err(e) = commands::dl::handle_dl(
+                                        &state.client,
+                                        chat_ref,
+                                        &url,
+                                        Some(&format_clone),
+                                        &state,
+                                    )
+                                    .await
+                                    {
+                                        tracing::error!("Failed download callback: {e:#}");
+                                    }
+                                });
+                            }
+                        }
+                    } else {
+                        let _ = query
+                            .answer()
+                            .alert("Download request expired or invalid.")
+                            .send()
+                            .await;
+                    }
+                }
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -73,9 +130,10 @@ async fn handle_message(
     if !text.starts_with('/') {
         let whitelisted_url = text.split_whitespace().find(|word| {
             let has_proto = word.starts_with("http://") || word.starts_with("https://");
-            has_proto && url::Url::parse(word)
-                .map(|parsed| state.registry.resolve(parsed.as_str()).is_ok())
-                .unwrap_or(false)
+            has_proto
+                && url::Url::parse(word)
+                    .map(|parsed| state.registry.resolve(parsed.as_str()).is_ok())
+                    .unwrap_or(false)
         });
 
         match whitelisted_url {
@@ -86,8 +144,95 @@ async fn handle_message(
                     None => anyhow::bail!("no peer ref"),
                 };
 
-                tracing::info!(sender = sender_id, url, "auto-detected link download requested");
-                commands::dl::handle_dl(&state.client, chat, url, state).await?;
+                tracing::info!(
+                    sender = sender_id,
+                    url,
+                    "auto-detected link: checking format"
+                );
+                let status_msg = state
+                    .client
+                    .send_message(chat, "Checking link media...")
+                    .await?;
+
+                match state.registry.fetch_metadata(url).await {
+                    Ok(info) => {
+                        if !info.has_video && !info.has_audio && !info.has_photo {
+                            state
+                                .client
+                                .edit_message(
+                                    chat,
+                                    status_msg.id(),
+                                    "No downloadable media found for this link.",
+                                )
+                                .await?;
+                            return Ok(());
+                        }
+
+                        let id: String = {
+                            use rand::Rng;
+                            rand::thread_rng()
+                                .sample_iter(&rand::distributions::Alphanumeric)
+                                .take(8)
+                                .map(|b| b as char)
+                                .collect()
+                        };
+
+                        state.pending_downloads.insert(id.clone(), url.to_string());
+
+                        let mut buttons = Vec::new();
+                        let mut media_row = Vec::new();
+                        if info.has_video {
+                            media_row.push(grammers_client::message::Button::data(
+                                "Video",
+                                format!("dl:video:{}", id),
+                            ));
+                        }
+                        if info.has_audio {
+                            media_row.push(grammers_client::message::Button::data(
+                                "Audio",
+                                format!("dl:audio:{}", id),
+                            ));
+                        }
+                        if !media_row.is_empty() {
+                            buttons.push(media_row);
+                        }
+
+                        if info.has_photo {
+                            buttons.push(vec![grammers_client::message::Button::data(
+                                "Photo",
+                                format!("dl:photo:{}", id),
+                            )]);
+                        }
+
+                        buttons.push(vec![grammers_client::message::Button::data(
+                            "Cancel",
+                            format!("dl:cancel:{}", id),
+                        )]);
+
+                        let markup = grammers_client::message::ReplyMarkup::from_buttons(&buttons);
+
+                        state
+                            .client
+                            .edit_message(
+                                chat,
+                                status_msg.id(),
+                                grammers_client::message::InputMessage::new()
+                                    .text("Link detected! Please select what you want to download:")
+                                    .reply_markup(markup),
+                            )
+                            .await?;
+                    }
+                    Err(e) => {
+                        state
+                            .client
+                            .edit_message(
+                                chat,
+                                status_msg.id(),
+                                format!("Failed to check link: {e}"),
+                            )
+                            .await?;
+                    }
+                }
             }
             None => {}
         }
@@ -114,7 +259,7 @@ async fn handle_message(
             let url = text.strip_prefix("/dl ").unwrap_or("").trim();
             if !url.is_empty() {
                 tracing::info!(sender = sender_id, url, "download requested");
-                commands::dl::handle_dl(&state.client, chat, url, state).await?;
+                commands::dl::handle_dl(&state.client, chat, url, None, state).await?;
             }
         }
         "/status" => {

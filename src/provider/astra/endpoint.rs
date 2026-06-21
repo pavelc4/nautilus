@@ -76,27 +76,39 @@ impl TryFrom<&url::Url> for AstraEndpoint {
         let path = url.path().to_lowercase();
 
         match host.as_str() {
-            h if h.contains("youtube.com") || h.contains("youtu.be") || h.contains("yewtu.be") || h.contains("inv.nadeko.net") => {
+            h if h.contains("youtube.com")
+                || h.contains("youtu.be")
+                || h.contains("yewtu.be")
+                || h.contains("inv.nadeko.net") =>
+            {
                 Ok(Self::YoutubeDownload)
             }
-            h if h.contains("tiktok.com") && path.contains("/music/") => {
-                Ok(Self::TiktokMusic)
-            }
-            h if h.contains("tiktok.com") && path.contains("/@") && !path.contains("/video/") && !path.contains("/photo/") => {
+            h if h.contains("tiktok.com") && path.contains("/music/") => Ok(Self::TiktokMusic),
+            h if h.contains("tiktok.com")
+                && path.contains("/@")
+                && !path.contains("/video/")
+                && !path.contains("/photo/") =>
+            {
                 Ok(Self::TiktokProfile)
             }
-            h if h.contains("tiktok.com") => {
-                Ok(Self::TiktokDownload)
-            }
-            h if h == "twitter.com" || h.ends_with(".twitter.com")
-                || h == "x.com" || h.ends_with(".x.com")
-                || h == "t.co" || h.ends_with(".t.co") => {
+            h if h.contains("tiktok.com") => Ok(Self::TiktokDownload),
+            h if h == "twitter.com"
+                || h.ends_with(".twitter.com")
+                || h == "x.com"
+                || h.ends_with(".x.com")
+                || h == "t.co"
+                || h.ends_with(".t.co") =>
+            {
                 Ok(Self::TwitterDownload)
             }
-            h if (h.contains("instagram.com") || h.contains("instagr.am")) && (path.contains("/stories/") || path.contains("/story/")) => {
+            h if (h.contains("instagram.com") || h.contains("instagr.am"))
+                && (path.contains("/stories/") || path.contains("/story/")) =>
+            {
                 Ok(Self::InstagramStories)
             }
-            h if (h.contains("instagram.com") || h.contains("instagr.am")) && instagram_is_profile_path(url) => {
+            h if (h.contains("instagram.com") || h.contains("instagr.am"))
+                && instagram_is_profile_path(url) =>
+            {
                 Ok(Self::InstagramProfile)
             }
             h if h.contains("instagram.com") || h.contains("instagr.am") => {
@@ -105,36 +117,23 @@ impl TryFrom<&url::Url> for AstraEndpoint {
             h if h.contains("facebook.com") || h.contains("fb.watch") || h.contains("fb.com") => {
                 Ok(Self::FacebookDownload)
             }
-            h if h.contains("threads.net") => {
-                Ok(Self::ThreadsDownload)
-            }
-            h if h.contains("reddit.com") || h.contains("redd.it") => {
-                Ok(Self::RedditDownload)
-            }
-            h if h.contains("pinterest.com") || h.contains("pin.it") => {
-                Ok(Self::PinterestDownload)
-            }
+            h if h.contains("threads.net") => Ok(Self::ThreadsDownload),
+            h if h.contains("reddit.com") || h.contains("redd.it") => Ok(Self::RedditDownload),
+            h if h.contains("pinterest.com") || h.contains("pin.it") => Ok(Self::PinterestDownload),
             h if h.contains("terabox.com")
                 || h.contains("nephobox.com")
                 || h.contains("dubox.com")
                 || h.contains("teraboxapp.com")
                 || h.contains("1024terabox.com")
                 || h.contains("terabox.app")
-                || h.contains("terabox.link") => {
+                || h.contains("terabox.link") =>
+            {
                 Ok(Self::TeraboxDownload)
             }
-            h if h.contains("spotify.com") => {
-                Ok(Self::SpotifyDownload)
-            }
-            h if h.contains("soundcloud.com") => {
-                Ok(Self::SoundcloudDownload)
-            }
-            h if h.contains("capcut.com") => {
-                Ok(Self::CapcutDownload)
-            }
-            h if h.contains("linkedin.com") => {
-                Ok(Self::LinkedinDownload)
-            }
+            h if h.contains("spotify.com") => Ok(Self::SpotifyDownload),
+            h if h.contains("soundcloud.com") => Ok(Self::SoundcloudDownload),
+            h if h.contains("capcut.com") => Ok(Self::CapcutDownload),
+            h if h.contains("linkedin.com") => Ok(Self::LinkedinDownload),
             _ => anyhow::bail!("unsupported domain: {host}"),
         }
     }
@@ -175,20 +174,32 @@ mod tests {
         ];
         for u in urls {
             let parsed = Url::parse(u).unwrap();
-            assert_eq!(AstraEndpoint::try_from(&parsed).unwrap(), AstraEndpoint::YoutubeDownload);
+            assert_eq!(
+                AstraEndpoint::try_from(&parsed).unwrap(),
+                AstraEndpoint::YoutubeDownload
+            );
         }
     }
 
     #[test]
     fn test_tiktok_routing() {
         let download_url = Url::parse("https://www.tiktok.com/@user/video/123").unwrap();
-        assert_eq!(AstraEndpoint::try_from(&download_url).unwrap(), AstraEndpoint::TiktokDownload);
+        assert_eq!(
+            AstraEndpoint::try_from(&download_url).unwrap(),
+            AstraEndpoint::TiktokDownload
+        );
 
         let music_url = Url::parse("https://www.tiktok.com/music/some-track-123").unwrap();
-        assert_eq!(AstraEndpoint::try_from(&music_url).unwrap(), AstraEndpoint::TiktokMusic);
+        assert_eq!(
+            AstraEndpoint::try_from(&music_url).unwrap(),
+            AstraEndpoint::TiktokMusic
+        );
 
         let profile_url = Url::parse("https://www.tiktok.com/@username").unwrap();
-        assert_eq!(AstraEndpoint::try_from(&profile_url).unwrap(), AstraEndpoint::TiktokProfile);
+        assert_eq!(
+            AstraEndpoint::try_from(&profile_url).unwrap(),
+            AstraEndpoint::TiktokProfile
+        );
     }
 
     #[test]
@@ -201,24 +212,38 @@ mod tests {
         ];
         for u in urls {
             let parsed = Url::parse(u).unwrap();
-            assert_eq!(AstraEndpoint::try_from(&parsed).unwrap(), AstraEndpoint::TwitterDownload);
+            assert_eq!(
+                AstraEndpoint::try_from(&parsed).unwrap(),
+                AstraEndpoint::TwitterDownload
+            );
         }
-        
+
         // Make sure a domain containing t.co but not ending/matching does not resolve to Twitter
         let reddit_fake = Url::parse("https://reddit.com/r/something").unwrap();
-        assert_eq!(AstraEndpoint::try_from(&reddit_fake).unwrap(), AstraEndpoint::RedditDownload);
+        assert_eq!(
+            AstraEndpoint::try_from(&reddit_fake).unwrap(),
+            AstraEndpoint::RedditDownload
+        );
     }
 
     #[test]
     fn test_instagram_routing() {
         let post_url = Url::parse("https://www.instagram.com/p/123").unwrap();
-        assert_eq!(AstraEndpoint::try_from(&post_url).unwrap(), AstraEndpoint::InstagramDownload);
+        assert_eq!(
+            AstraEndpoint::try_from(&post_url).unwrap(),
+            AstraEndpoint::InstagramDownload
+        );
 
         let story_url = Url::parse("https://www.instagram.com/stories/user/123").unwrap();
-        assert_eq!(AstraEndpoint::try_from(&story_url).unwrap(), AstraEndpoint::InstagramStories);
+        assert_eq!(
+            AstraEndpoint::try_from(&story_url).unwrap(),
+            AstraEndpoint::InstagramStories
+        );
 
         let profile_url = Url::parse("https://www.instagram.com/username").unwrap();
-        assert_eq!(AstraEndpoint::try_from(&profile_url).unwrap(), AstraEndpoint::InstagramProfile);
+        assert_eq!(
+            AstraEndpoint::try_from(&profile_url).unwrap(),
+            AstraEndpoint::InstagramProfile
+        );
     }
 }
-

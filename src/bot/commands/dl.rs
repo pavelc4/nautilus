@@ -49,6 +49,7 @@ pub async fn handle_dl(
     client: &Client,
     chat: PeerRef,
     url: &str,
+    format: Option<&str>,
     state: &Arc<AppState>,
 ) -> anyhow::Result<()> {
     let url = normalize_url(url);
@@ -58,8 +59,8 @@ pub async fn handle_dl(
         .await?;
     let status_id = status_msg.id();
 
-    tracing::info!(url, "resolving URL via provider chain");
-    let items = match state.registry.resolve_and_fetch(&url).await {
+    tracing::info!(url, ?format, "resolving URL via provider chain");
+    let items = match state.registry.resolve_and_fetch(&url, format).await {
         Ok(items) => items,
         Err(e) => {
             state.bot_stats.record_failure();

@@ -81,7 +81,7 @@ fn clean_go_duration(dur: &str) -> String {
             result.push(c);
         }
     }
-    
+
     let mut formatted = String::new();
     let mut prev_is_unit = false;
     for c in result.chars() {
@@ -203,8 +203,16 @@ async fn query_astra_health(api_url: &str) -> String {
         0.0
     };
 
-    let ig_cookie = if data.cookies.instagram { "Loaded" } else { "Missing" };
-    let fb_cookie = if data.cookies.facebook { "Loaded" } else { "Missing" };
+    let ig_cookie = if data.cookies.instagram {
+        "Loaded"
+    } else {
+        "Missing"
+    };
+    let fb_cookie = if data.cookies.facebook {
+        "Loaded"
+    } else {
+        "Missing"
+    };
 
     format!(
         "\u{251c} Status: {} (Go {})\n\
@@ -314,7 +322,11 @@ pub async fn cmd_status(state: &Arc<AppState>, client: &Client) -> anyhow::Resul
         "Swap: 0 B / 512.00 MB (0%)".to_string()
     };
 
-    let astra_url = state.config.astra_api_url.as_deref().unwrap_or("http://localhost:3000");
+    let astra_url = state
+        .config
+        .astra_api_url
+        .as_deref()
+        .unwrap_or("http://localhost:3000");
     let astra_status = query_astra_health(astra_url).await;
 
     let text = format!(

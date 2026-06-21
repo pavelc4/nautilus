@@ -1,5 +1,5 @@
-use tokio_stream::StreamExt;
 use crate::provider::{MediaItem, MediaKind, MediaMeta, MediaReader};
+use tokio_stream::StreamExt;
 
 pub fn parse_quality(q: &str) -> u32 {
     let clean: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
@@ -25,7 +25,10 @@ pub fn sanitize_filename(title: &str, default: &str) -> String {
     }
 }
 
-pub async fn fetch_stream(client: &reqwest::Client, url: &str) -> anyhow::Result<(u64, MediaReader)> {
+pub async fn fetch_stream(
+    client: &reqwest::Client,
+    url: &str,
+) -> anyhow::Result<(u64, MediaReader)> {
     let resp = client.get(url).send().await?;
     if !resp.status().is_success() {
         anyhow::bail!("Failed to fetch stream from CDN: {}", resp.status());

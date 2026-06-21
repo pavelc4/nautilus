@@ -17,8 +17,20 @@ impl ProviderRegistry {
             .ok_or_else(|| anyhow::anyhow!("unsupported URL: {url}"))
     }
 
-    pub async fn resolve_and_fetch(&self, url: &str) -> anyhow::Result<Vec<MediaItem>> {
+    pub async fn resolve_and_fetch(
+        &self,
+        url: &str,
+        format: Option<&str>,
+    ) -> anyhow::Result<Vec<MediaItem>> {
         let provider = self.resolve(url)?;
-        provider.resolve(url).await
+        provider.resolve(url, format).await
+    }
+
+    pub async fn fetch_metadata(
+        &self,
+        url: &str,
+    ) -> anyhow::Result<crate::provider::MediaMetadataInfo> {
+        let provider = self.resolve(url)?;
+        provider.fetch_metadata(url).await
     }
 }
