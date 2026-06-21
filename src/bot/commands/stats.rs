@@ -252,7 +252,7 @@ async fn query_astra_health(api_url: &str) -> String {
     )
 }
 
-pub async fn cmd_status(state: &Arc<AppState>, client: &Client) -> anyhow::Result<InputMessage> {
+pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result<InputMessage> {
     let stats = &state.bot_stats;
 
     let ping_start = Instant::now();
@@ -307,6 +307,7 @@ pub async fn cmd_status(state: &Arc<AppState>, client: &Client) -> anyhow::Resul
     let processed = stats.processed_total();
     let ok = stats.processed_ok();
     let fail = stats.processed_fail();
+    let cache_hits = stats.cache_hits();
 
     let (cpu_pct, bot_cpu) = sample_cpu_stats(Duration::from_millis(150)).await;
 
@@ -340,6 +341,7 @@ pub async fn cmd_status(state: &Arc<AppState>, client: &Client) -> anyhow::Resul
         \u{2514} Handler errors: {fail}\n\
         Metrics:\n\
         \u{251c} Downloads: {processed}\n\
+        \u{251c} Cache Hits: {cache_hits}\n\
         \u{2514} Memory: {:.2} KB\n\n\
         System:\n\
         \u{251c} CPU: {ncpus} cores @ {cpu_pct:.1}%\n\

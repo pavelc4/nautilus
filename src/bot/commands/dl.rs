@@ -85,6 +85,7 @@ pub async fn handle_dl(
         let cached = cached.value();
         if !cached.medias.is_empty() {
             tracing::info!(url, "cache hit at bot level, sending cached media");
+            state.bot_stats.record_cache_hit();
             let _ = client
                 .edit_message(
                     chat,

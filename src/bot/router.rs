@@ -240,7 +240,7 @@ async fn handle_message(
     }
 
     let cmd = text.split_whitespace().next().unwrap_or("");
-    let whitelist = ["/dl", "/start", "/status", "/settings"];
+    let whitelist = ["/dl", "/start", "/stats", "/settings"];
     if !whitelist.contains(&cmd) {
         return Ok(());
     }
@@ -262,8 +262,8 @@ async fn handle_message(
                 commands::dl::handle_dl(&state.client, chat, url, None, state).await?;
             }
         }
-        "/status" => {
-            let reply = commands::status::cmd_status(state, &state.client).await?;
+        "/stats" => {
+            let reply = commands::stats::cmd_stats(state, &state.client).await?;
             state.client.send_message(chat, reply).await?;
         }
         "/settings" => {

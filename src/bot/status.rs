@@ -10,6 +10,7 @@ pub struct BotStats {
     processed_ok: AtomicU64,
     processed_fail: AtomicU64,
     active_jobs: AtomicU64,
+    cache_hits: AtomicU64,
 }
 
 impl BotStats {
@@ -22,6 +23,7 @@ impl BotStats {
             processed_ok: AtomicU64::new(0),
             processed_fail: AtomicU64::new(0),
             active_jobs: AtomicU64::new(0),
+            cache_hits: AtomicU64::new(0),
         }
     }
 
@@ -37,6 +39,10 @@ impl BotStats {
     pub fn record_failure(&self) {
         self.processed_total.fetch_add(1, Ordering::Relaxed);
         self.processed_fail.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_cache_hit(&self) {
+        self.cache_hits.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn incr_active_jobs(&self) {
@@ -68,5 +74,8 @@ impl BotStats {
     }
     pub fn active_jobs(&self) -> u64 {
         self.active_jobs.load(Ordering::Relaxed)
+    }
+    pub fn cache_hits(&self) -> u64 {
+        self.cache_hits.load(Ordering::Relaxed)
     }
 }
