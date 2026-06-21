@@ -78,7 +78,7 @@ pub async fn upload_media(
 }
 
 pub fn build_media_message(caption: &str, meta: &MediaMeta, uploaded: Uploaded) -> InputMessage {
-    let mut msg = InputMessage::new().text(caption);
+    let mut msg = InputMessage::new().html(caption);
     msg = msg.mime_type(&meta.mime_type);
 
     match meta.kind {
@@ -109,7 +109,7 @@ pub fn build_media_message(caption: &str, meta: &MediaMeta, uploaded: Uploaded) 
 pub fn build_media_input(caption: &str, meta: &MediaMeta, uploaded: Uploaded) -> InputMedia {
     let mut media = InputMedia::new();
     if !caption.is_empty() {
-        media = media.caption(caption);
+        media = media.html(caption);
     }
     media = media.mime_type(&meta.mime_type);
 

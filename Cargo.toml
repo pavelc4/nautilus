@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-grammers-client = { git = "https://codeberg.org/Lonami/grammers.git" }
+grammers-client = { git = "https://codeberg.org/Lonami/grammers.git", features = ["html", "markdown"] }
 grammers-session = { git = "https://codeberg.org/Lonami/grammers.git", features = ["sqlite-storage"] }
 grammers-mtsender = { git = "https://codeberg.org/Lonami/grammers.git" }
 envy = "0.4"

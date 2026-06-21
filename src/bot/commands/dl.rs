@@ -94,30 +94,46 @@ pub async fn handle_dl(
                 )
                 .await;
 
-            let emoji = match cached.kind {
-                MediaKind::Video => "🎬",
-                MediaKind::Audio => "🎵",
-                MediaKind::Photo => "🖼️",
-                MediaKind::File => "📎",
-            };
-
             let mut caption = String::new();
+            let mut quote_content = String::new();
             if let Some(ref t) = cached.title {
-                caption.push_str(&format!("{emoji} {t}\n\n"));
+                let escaped_t = html_escape(t);
+                quote_content.push_str(&format!("<b>{escaped_t}</b>\n"));
             }
             if let Some(ref desc) = cached.description {
-                caption.push_str(desc);
-                caption.push_str("\n\n");
+                let escaped_desc = html_escape(desc);
+                quote_content.push_str(&escaped_desc);
             }
-            caption.push_str(&format!(
-                "🦀 Powered by @{}",
-                state.bot_stats.bot_username()
-            ));
+            let quote_content = quote_content.trim();
+            if !quote_content.is_empty() {
+                caption.push_str(&format!("<blockquote>{quote_content}</blockquote>\n\n"));
+            }
+
+            let type_str = match cached.kind {
+                MediaKind::Video => "Video",
+                MediaKind::Photo => "Photo",
+                MediaKind::Audio => "Audio",
+                MediaKind::File => "File",
+            };
+
+            let total_size: u64 = cached
+                .medias
+                .iter()
+                .map(|m| m.size().unwrap_or(0) as u64)
+                .sum();
+            let size_mb = (total_size as f64) / (1024.0 * 1024.0);
+
+            caption.push_str(&format!("🔗 Sumber: {}\n", get_source_link(&url)));
+            caption.push_str(&format!("🏷 Tipe: {type_str}\n"));
+            caption.push_str(&format!("💾 Ukuran: {:.2} MB\n\n", size_mb));
+            caption.push_str(
+                "😼 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>",
+            );
 
             if cached.medias.len() == 1 {
                 let media = &cached.medias[0];
                 if let Some(im) = media.to_raw_input_media() {
-                    let msg = InputMessage::new().text(caption).media(im);
+                    let msg = InputMessage::new().html(caption).media(im);
                     let _ = client.send_message(chat, msg).await;
                 }
             } else {
@@ -126,7 +142,7 @@ pub async fn handle_dl(
                     let mut input_media =
                         grammers_client::media::InputMedia::new().copy_media(media);
                     if idx == 0 {
-                        input_media = input_media.caption(&caption);
+                        input_media = input_media.html(&caption);
                     }
                     album_medias.push(input_media);
                 }
@@ -190,25 +206,35 @@ pub async fn handle_dl(
     let title = items[0].meta.title.clone();
     let description = items[0].meta.description.clone();
 
-    let emoji = match kind {
-        MediaKind::Video => "🎬",
-        MediaKind::Audio => "🎵",
-        MediaKind::Photo => "🖼️",
-        MediaKind::File => "📎",
-    };
-
     let mut caption = String::new();
+    let mut quote_content = String::new();
     if let Some(ref t) = title {
-        caption.push_str(&format!("{emoji} {t}\n\n"));
+        let escaped_t = html_escape(t);
+        quote_content.push_str(&format!("<b>{escaped_t}</b>\n"));
     }
     if let Some(ref desc) = description {
-        caption.push_str(desc);
-        caption.push_str("\n\n");
+        let escaped_desc = html_escape(desc);
+        quote_content.push_str(&escaped_desc);
     }
-    caption.push_str(&format!(
-        "🦀 Powered by @{}",
-        state.bot_stats.bot_username()
-    ));
+    let quote_content = quote_content.trim();
+    if !quote_content.is_empty() {
+        caption.push_str(&format!("<blockquote>{quote_content}</blockquote>\n\n"));
+    }
+
+    let type_str = match kind {
+        MediaKind::Video => "Video",
+        MediaKind::Photo => "Photo",
+        MediaKind::Audio => "Audio",
+        MediaKind::File => "File",
+    };
+
+    let total_size: u64 = items.iter().map(|item| item.meta.size).sum();
+    let size_mb = (total_size as f64) / (1024.0 * 1024.0);
+
+    caption.push_str(&format!("🔗 Sumber: {}\n", get_source_link(&url)));
+    caption.push_str(&format!("🏷 Tipe: {type_str}\n"));
+    caption.push_str(&format!("💾 Ukuran: {:.2} MB\n\n", size_mb));
+    caption.push_str("😼 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>");
 
     let mut uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
         Vec::with_capacity(total);
@@ -385,4 +411,55 @@ pub async fn handle_dl(
     let _ = client.delete_messages(chat, &[status_id]).await;
     state.bot_stats.record_success();
     Ok(())
+}
+
+fn detect_platform(url: &str) -> Option<&'static str> {
+    let lower = url.to_lowercase();
+    if lower.contains("facebook.com") || lower.contains("fb.watch") || lower.contains("fb.com") {
+        Some("Facebook")
+    } else if lower.contains("instagram.com") || lower.contains("instagr.am") {
+        Some("Instagram")
+    } else if lower.contains("tiktok.com") {
+        Some("TikTok")
+    } else if lower.contains("twitter.com") || lower.contains("x.com") {
+        Some("Twitter")
+    } else if lower.contains("youtube.com") || lower.contains("youtu.be") {
+        Some("YouTube")
+    } else if lower.contains("pinterest.com") || lower.contains("pin.it") {
+        Some("Pinterest")
+    } else if lower.contains("linkedin.com") {
+        Some("LinkedIn")
+    } else if lower.contains("soundcloud.com") {
+        Some("SoundCloud")
+    } else if lower.contains("spotify.com") {
+        Some("Spotify")
+    } else if lower.contains("threads.com") || lower.contains("threads.net") {
+        Some("Threads")
+    } else if lower.contains("terabox.com") || lower.contains("1024terabox.com") {
+        Some("TeraBox")
+    } else {
+        None
+    }
+}
+
+fn get_source_link(url: &str) -> String {
+    let escaped_url = html_escape(url);
+    if let Some(platform) = detect_platform(url) {
+        format!("<a href=\"{escaped_url}\">{platform}</a>")
+    } else {
+        let domain = url::Url::parse(url)
+            .ok()
+            .and_then(|u| u.domain().map(|d| d.to_string()))
+            .unwrap_or_else(|| "Source".to_string());
+        let escaped_domain = html_escape(&domain);
+        format!("<a href=\"{escaped_url}\">{escaped_domain}</a>")
+    }
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
 }
