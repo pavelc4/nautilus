@@ -239,11 +239,28 @@ async fn handle_message(
         return Ok(());
     }
 
-    let cmd = text.split_whitespace().next().unwrap_or("");
+    let first_word = text.split_whitespace().next().unwrap_or("");
+    let mut cmd = first_word;
+    let mut is_for_me = true;
+
+    if first_word.starts_with('/') {
+        if let Some(idx) = first_word.find('@') {
+            let (base_cmd, bot_part) = first_word.split_at(idx);
+            let bot_name = &bot_part[1..]; // skip '@'
+            cmd = base_cmd;
+            is_for_me = bot_name.eq_ignore_ascii_case(state.bot_stats.bot_username());
+        }
+    }
+
     let whitelist = ["/dl", "/start", "/stats", "/settings"];
-    if !whitelist.contains(&cmd) {
+    if !is_for_me || !whitelist.contains(&cmd) {
         return Ok(());
     }
+
+    let args = text
+        .split_once(char::is_whitespace)
+        .map(|(_, rest)| rest.trim())
+        .unwrap_or("");
 
     // Resolve the chat peer reference once for all valid commands
     let peer = msg.peer().ok_or_else(|| anyhow::anyhow!("no peer"))?;
@@ -256,10 +273,9 @@ async fn handle_message(
 
     match cmd {
         "/dl" => {
-            let url = text.strip_prefix("/dl ").unwrap_or("").trim();
-            if !url.is_empty() {
-                tracing::info!(sender = sender_id, url, "download requested");
-                commands::dl::handle_dl(&state.client, chat, url, None, state).await?;
+            if !args.is_empty() {
+                tracing::info!(sender = sender_id, url = args, "download requested");
+                commands::dl::handle_dl(&state.client, chat, args, None, state).await?;
             }
         }
         "/stats" => {
@@ -267,7 +283,6 @@ async fn handle_message(
             state.client.send_message(chat, reply).await?;
         }
         "/settings" => {
-            let args = text.strip_prefix("/settings").unwrap_or("").trim();
             let reply = commands::settings::cmd_settings(state, sender_id, args);
             state.client.send_message(chat, reply).await?;
         }
