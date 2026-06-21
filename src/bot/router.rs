@@ -83,6 +83,27 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                                 let state = state.clone();
                                 let format_clone = format.clone();
                                 let id_clone = id.clone();
+
+                                let sender_name = if let Some(sender) = query.sender() {
+                                    match sender {
+                                        grammers_client::peer::Peer::User(user) => {
+                                            let first_name = user.first_name().unwrap_or("User");
+                                            let escaped_first = html_escape(first_name);
+                                            if let Some(username) = user.username() {
+                                                Some(format!("@{} ({})", username, escaped_first))
+                                            } else {
+                                                let user_id = user.id().bare_id_unchecked();
+                                                Some(format!(
+                                                    "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
+                                                ))
+                                            }
+                                        }
+                                        _ => None,
+                                    }
+                                } else {
+                                    None
+                                };
+
                                 tokio::spawn(async move {
                                     state.pending_downloads.remove(&id_clone);
                                     if let Err(e) = commands::dl::handle_dl(
@@ -91,6 +112,7 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                                         &url,
                                         Some(&format_clone),
                                         &state,
+                                        sender_name,
                                     )
                                     .await
                                     {
@@ -126,6 +148,26 @@ async fn handle_message(
             _ => None,
         })
         .unwrap_or(0i64);
+
+    let sender_name = if let Some(sender) = msg.sender() {
+        match sender {
+            grammers_client::peer::Peer::User(user) => {
+                let first_name = user.first_name().unwrap_or("User");
+                let escaped_first = html_escape(first_name);
+                if let Some(username) = user.username() {
+                    Some(format!("@{} ({})", username, escaped_first))
+                } else {
+                    let user_id = user.id().bare_id_unchecked();
+                    Some(format!(
+                        "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
+                    ))
+                }
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
 
     if !text.starts_with('/') {
         let whitelisted_url = text.split_whitespace().find(|word| {
@@ -275,7 +317,8 @@ async fn handle_message(
         "/dl" => {
             if !args.is_empty() {
                 tracing::info!(sender = sender_id, url = args, "download requested");
-                commands::dl::handle_dl(&state.client, chat, args, None, state).await?;
+                commands::dl::handle_dl(&state.client, chat, args, None, state, sender_name)
+                    .await?;
             }
         }
         "/stats" => {
@@ -293,4 +336,12 @@ async fn handle_message(
     }
 
     Ok(())
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
 }

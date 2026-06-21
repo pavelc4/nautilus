@@ -68,6 +68,7 @@ pub async fn handle_dl(
     url: &str,
     format: Option<&str>,
     state: &Arc<AppState>,
+    sender_name: Option<String>,
 ) -> anyhow::Result<()> {
     let _guard = JobGuard::new(state.clone());
     let url = normalize_url(url);
@@ -125,9 +126,12 @@ pub async fn handle_dl(
 
             caption.push_str(&format!("🔗 Sumber: {}\n", get_source_link(&url)));
             caption.push_str(&format!("🏷 Tipe: {type_str}\n"));
-            caption.push_str(&format!("💾 Ukuran: {:.2} MB\n\n", size_mb));
+            caption.push_str(&format!("💾 Ukuran: {:.2} MB\n", size_mb));
+            if let Some(ref name) = sender_name {
+                caption.push_str(&format!("👤 Oleh: {name}\n"));
+            }
             caption.push_str(
-                "😼 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>",
+                "\n😼 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>",
             );
 
             if cached.medias.len() == 1 {
@@ -233,8 +237,11 @@ pub async fn handle_dl(
 
     caption.push_str(&format!("🔗 Sumber: {}\n", get_source_link(&url)));
     caption.push_str(&format!("🏷 Tipe: {type_str}\n"));
-    caption.push_str(&format!("💾 Ukuran: {:.2} MB\n\n", size_mb));
-    caption.push_str("😼 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>");
+    caption.push_str(&format!("💾 Ukuran: {:.2} MB\n", size_mb));
+    if let Some(ref name) = sender_name {
+        caption.push_str(&format!("👤 Oleh: {name}\n"));
+    }
+    caption.push_str("\n😼 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>");
 
     let mut uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
         Vec::with_capacity(total);
