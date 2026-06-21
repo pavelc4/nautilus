@@ -1,4 +1,5 @@
+pub mod about;
 pub mod dl;
-pub mod settings;
+pub mod help;
 pub mod start;
 pub mod stats;

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use grammers_client::client::UpdatesConfiguration;
 use grammers_client::update::Update;
+use grammers_client::message::InputMessage;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::app::AppState;
@@ -87,11 +88,11 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                                 let sender_name = if let Some(sender) = query.sender() {
                                     match sender {
                                         grammers_client::peer::Peer::User(user) => {
-                                            let first_name = user.first_name().unwrap_or("User");
-                                            let escaped_first = html_escape(first_name);
                                             if let Some(username) = user.username() {
-                                                Some(format!("@{} ({})", username, escaped_first))
+                                                Some(format!("@{}", username))
                                             } else {
+                                                let first_name = user.first_name().unwrap_or("User");
+                                                let escaped_first = html_escape(first_name);
                                                 let user_id = user.id().bare_id_unchecked();
                                                 Some(format!(
                                                     "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
@@ -129,6 +130,27 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                             .await;
                     }
                 }
+            } else if data == "cmd:start"
+                || data == "cmd:help"
+                || data == "cmd:about"
+            {
+                let _ = query.answer().send().await;
+                if let Ok(Some(chat_ref)) = query.peer_ref().await {
+                    if let grammers_client::tl::enums::Update::BotCallbackQuery(update) = &query.raw
+                    {
+                        let reply = match data.as_str() {
+                            "cmd:start" => commands::start::cmd_start_msg(),
+                            "cmd:help" => commands::help::cmd_help(),
+                            "cmd:about" => commands::about::cmd_about(),
+                            _ => unreachable!(),
+                        };
+
+                        let _ = state
+                            .client
+                            .edit_message(chat_ref, update.msg_id, reply)
+                            .await;
+                    }
+                }
             }
             Ok(())
         }
@@ -152,11 +174,11 @@ async fn handle_message(
     let sender_name = if let Some(sender) = msg.sender() {
         match sender {
             grammers_client::peer::Peer::User(user) => {
-                let first_name = user.first_name().unwrap_or("User");
-                let escaped_first = html_escape(first_name);
                 if let Some(username) = user.username() {
-                    Some(format!("@{} ({})", username, escaped_first))
+                    Some(format!("@{}", username))
                 } else {
+                    let first_name = user.first_name().unwrap_or("User");
+                    let escaped_first = html_escape(first_name);
                     let user_id = user.id().bare_id_unchecked();
                     Some(format!(
                         "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
@@ -294,7 +316,16 @@ async fn handle_message(
         }
     }
 
-    let whitelist = ["/dl", "/start", "/stats", "/settings"];
+    let whitelist = [
+        "/dl",
+        "/l",
+        "/mp",
+        "/audio",
+        "/start",
+        "/stats",
+        "/help",
+        "/about",
+    ];
     if !is_for_me || !whitelist.contains(&cmd) {
         return Ok(());
     }
@@ -314,23 +345,42 @@ async fn handle_message(
         .ok_or_else(|| anyhow::anyhow!("no peer ref"))?;
 
     match cmd {
-        "/dl" => {
+        "/dl" | "/l" => {
             if !args.is_empty() {
                 tracing::info!(sender = sender_id, url = args, "download requested");
                 commands::dl::handle_dl(&state.client, chat, args, None, state, sender_name)
                     .await?;
+            } else {
+                let text = "⚠️ <b>Usage:</b> <code>/dl &lt;url&gt;</code> or <code>/l &lt;url&gt;</code>\n\
+                            Example: <code>/dl https://tiktok.com/...</code>";
+                state.client.send_message(chat, InputMessage::new().html(text)).await?;
+            }
+        }
+        "/mp" | "/audio" => {
+            if !args.is_empty() {
+                tracing::info!(sender = sender_id, url = args, "audio download requested");
+                commands::dl::handle_dl(&state.client, chat, args, Some("audio"), state, sender_name)
+                    .await?;
+            } else {
+                let text = "⚠️ <b>Usage:</b> <code>/mp &lt;url&gt;</code> or <code>/audio &lt;url&gt;</code>\n\
+                            Example: <code>/mp https://youtube.com/...</code>";
+                state.client.send_message(chat, InputMessage::new().html(text)).await?;
             }
         }
         "/stats" => {
             let reply = commands::stats::cmd_stats(state, &state.client).await?;
             state.client.send_message(chat, reply).await?;
         }
-        "/settings" => {
-            let reply = commands::settings::cmd_settings(state, sender_id, args);
-            state.client.send_message(chat, reply).await?;
-        }
         "/start" => {
             commands::start::cmd_start(&state.client, chat).await?;
+        }
+        "/help" => {
+            let reply = commands::help::cmd_help();
+            state.client.send_message(chat, reply).await?;
+        }
+        "/about" => {
+            let reply = commands::about::cmd_about();
+            state.client.send_message(chat, reply).await?;
         }
         _ => {}
     }

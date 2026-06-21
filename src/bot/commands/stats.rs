@@ -322,6 +322,22 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
         "Swap: 0 B / 512.00 MB (0%)".to_string()
     };
 
+    let success_rate = if processed > 0 {
+        (ok as f64 / processed as f64) * 100.0
+    } else {
+        100.0
+    };
+    let success_filled = ((success_rate / 10.0).floor() as usize).clamp(0, 10);
+    let success_bar = format!("{}{}", "#".repeat(success_filled), "-".repeat(10 - success_filled));
+
+    let cache_ratio = if processed > 0 {
+        (cache_hits as f64 / processed as f64) * 100.0
+    } else {
+        0.0
+    };
+    let cache_filled = ((cache_ratio / 10.0).floor() as usize).clamp(0, 10);
+    let cache_bar = format!("{}{}", "#".repeat(cache_filled), "-".repeat(10 - cache_filled));
+
     let astra_url = state
         .config
         .astra_api_url
@@ -330,43 +346,47 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
     let astra_status = query_astra_health(astra_url).await;
 
     let text = format!(
-        "Ping: {ping_ms:.0}ms\n\
-        \n\
-        Pipeline:\n\
-        \u{251c} Health: {}\n\
-        \u{251c} Processed: {processed}\n\
-        \u{2502}  \u{251c} OK: {ok}\n\
-        \u{2502}  \u{2514} Failed: {fail}\n\
-        \u{251c} Active: {active_jobs}\n\
-        \u{2514} Handler errors: {fail}\n\
-        Metrics:\n\
-        \u{251c} Downloads: {processed}\n\
-        \u{251c} Cache Hits: {cache_hits}\n\
-        \u{2514} Memory: {:.2} KB\n\n\
-        System:\n\
-        \u{251c} CPU: {ncpus} cores @ {cpu_pct:.1}%\n\
-        \u{251c} RAM: {} / {} ({mem_pct:.0}%)\n\
-        \u{251c} {swap_str}\n\
-        \u{2514} Load: {load1} {load5} {load15}\n\n\
-        Bot:\n\
-        \u{251c} ID: {}\n\
-        \u{251c} Username: @{}\n\
-        \u{251c} Memory: {} MB\n\
-        \u{251c} CPU: {bot_cpu:.1}%\n\
-        \u{2514} Uptime: {uptime_str}\n\n\
-        Astra:\n\
-        {}",
+        "⚡️ <b>Nautilus Status Dashboard</b> (Ping: {ping_ms:.0}ms)\n\n\
+         <b>Pipeline:</b>\n\
+         ├ <b>Health:</b> {}\n\
+         ├ <b>Processed:</b> {processed}\n\
+         │  ├ <b>OK:</b> {ok}\n\
+         │  └ <b>Failed:</b> {fail}\n\
+         ├ <b>Success Rate:</b> [<code>{}</code>] {:.1}%\n\
+         ├ <b>Active Jobs:</b> {active_jobs}\n\
+         └ <b>Handler Errors:</b> {fail}\n\n\
+         <b>Metrics:</b>\n\
+         ├ <b>Total Downloads:</b> {processed}\n\
+         ├ <b>Cache Hits:</b> {cache_hits}\n\
+         └ <b>Cache Ratio:</b> [<code>{}</code>] {:.1}%\n\n\
+         <b>System:</b>\n\
+         ├ <b>CPU:</b> {ncpus} cores @ {cpu_pct:.1}%\n\
+         ├ <b>RAM:</b> {} / {} ({mem_pct:.0}%)\n\
+         ├ <b>{}</b>\n\
+         └ <b>Load:</b> {load1} {load5} {load15}\n\n\
+         <b>Bot:</b>\n\
+         ├ <b>Username:</b> @{}\n\
+         ├ <b>Memory:</b> {} MB (RSS: {:.2} KB)\n\
+         ├ <b>CPU:</b> {bot_cpu:.1}%\n\
+         └ <b>Uptime:</b> {}\n\n\
+         <b>Astra Backend:</b>\n\
+         {}",
         if fail == 0 { "Healthy" } else { "Errors" },
-        vm_rss_kb as f64,
+        success_bar,
+        success_rate,
+        cache_bar,
+        cache_ratio,
         format_memory(mem_used_mb),
         format_memory(mem_total_mb),
-        stats.bot_id(),
+        swap_str,
         stats.bot_username(),
         format!("{:.2}", bot_mem_mb),
+        vm_rss_kb as f64,
+        uptime_str,
         astra_status,
     );
 
-    Ok(InputMessage::new().text(text))
+    Ok(InputMessage::new().html(text))
 }
 
 async fn read_proc(path: &str) -> anyhow::Result<String> {

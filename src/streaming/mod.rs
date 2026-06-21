@@ -33,6 +33,7 @@ pub async fn upload_media(
 
         Some(tokio::spawn(async move {
             let mut last_edited = tokio::time::Instant::now();
+            let start_time = tokio::time::Instant::now();
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 let read = byte_counter.load(Ordering::Relaxed);
@@ -48,14 +49,52 @@ pub async fn upload_media(
                 }
                 if last_edited.elapsed() >= edit_interval {
                     let pct = read as f64 / total as f64 * 100.0;
+                    let filled = ((pct / 10.0).floor() as usize).clamp(0, 10);
+                    let bar = format!("{}{}", "#".repeat(filled), "-".repeat(10 - filled));
+
+                    let elapsed = start_time.elapsed().as_secs_f64();
+                    let speed = if elapsed > 0.0 {
+                        read as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+
+                    let speed_str = if speed > 1024.0 * 1024.0 {
+                        format!("{:.2} MB/s", speed / (1024.0 * 1024.0))
+                    } else if speed > 1024.0 {
+                        format!("{:.1} KB/s", speed / 1024.0)
+                    } else {
+                        format!("{:.0} B/s", speed)
+                    };
+
+                    let eta = if speed > 0.0 {
+                        let remaining_bytes = total.saturating_sub(read) as f64;
+                        let eta_secs = (remaining_bytes / speed).round() as u64;
+                        if eta_secs > 3600 {
+                            format!("{:02}:{:02}:{:02}", eta_secs / 3600, (eta_secs % 3600) / 60, eta_secs % 60)
+                        } else {
+                            format!("{:02}:{:02}", eta_secs / 60, eta_secs % 60)
+                        }
+                    } else {
+                        "--:--".to_string()
+                    };
+
+                    let read_mb = read as f64 / (1024.0 * 1024.0);
+                    let total_mb = total as f64 / (1024.0 * 1024.0);
+
+                    let progress_text = format!(
+                        "⚡️ <b>Uploading:</b> [<code>{}</code>] {:.1}%\n\
+                         ├ <b>Progress:</b> {:.2} MB / {:.2} MB\n\
+                         ├ <b>Speed:</b> {}\n\
+                         └ <b>ETA:</b> {}",
+                        bar, pct, read_mb, total_mb, speed_str, eta
+                    );
+
                     let _ = client
                         .edit_message(
                             chat,
                             status_msg_id,
-                            InputMessage::new().text(format!(
-                                "Uploading: {:.1}% ({} / {} bytes)",
-                                pct, read, total
-                            )),
+                            InputMessage::new().html(progress_text),
                         )
                         .await;
                     last_edited = tokio::time::Instant::now();

@@ -235,13 +235,13 @@ pub async fn handle_dl(
     let total_size: u64 = items.iter().map(|item| item.meta.size).sum();
     let size_mb = (total_size as f64) / (1024.0 * 1024.0);
 
-    caption.push_str(&format!("🔗 Sumber: {}\n", get_source_link(&url)));
-    caption.push_str(&format!("🏷 Tipe: {type_str}\n"));
-    caption.push_str(&format!("💾 Ukuran: {:.2} MB\n", size_mb));
+    caption.push_str(&format!("🖇️ Source: {}\n", get_source_link(&url)));
+    caption.push_str(&format!("📄 Type: {type_str}\n"));
+    caption.push_str(&format!("📁 Size: {:.2} MB\n", size_mb));
     if let Some(ref name) = sender_name {
-        caption.push_str(&format!("👤 Oleh: {name}\n"));
+        caption.push_str(&format!("👤 By: {name}\n"));
     }
-    caption.push_str("\n😼 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>");
+    caption.push_str("\n💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>");
 
     let mut uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
         Vec::with_capacity(total);
