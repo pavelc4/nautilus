@@ -71,13 +71,17 @@ pub async fn handle_dl(
 ) -> anyhow::Result<()> {
     let _guard = JobGuard::new(state.clone());
     let url = normalize_url(url);
+    let cache_key = match format {
+        Some(f) => format!("{url}#{f}"),
+        None => url.clone(),
+    };
 
     let status_msg = client
         .send_message(chat, InputMessage::new().text("Resolving URL..."))
         .await?;
     let status_id = status_msg.id();
 
-    if let Some(cached) = state.media_cache.get(&url) {
+    if let Some(cached) = state.media_cache.get(&cache_key) {
         let cached = cached.value();
         if !cached.medias.is_empty() {
             tracing::info!(url, "cache hit at bot level, sending cached media");
@@ -363,7 +367,7 @@ pub async fn handle_dl(
 
     if !sent_medias.is_empty() {
         state.media_cache.insert(
-            url,
+            cache_key,
             crate::app::CachedMedia {
                 medias: sent_medias,
                 title,
