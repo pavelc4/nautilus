@@ -71,6 +71,26 @@ async fn handle_message(
         .unwrap_or(0i64);
 
     if !text.starts_with('/') {
+        let whitelisted_url = text.split_whitespace().find(|word| {
+            let has_proto = word.starts_with("http://") || word.starts_with("https://");
+            has_proto && url::Url::parse(word)
+                .map(|parsed| state.registry.resolve(parsed.as_str()).is_ok())
+                .unwrap_or(false)
+        });
+
+        match whitelisted_url {
+            Some(url) => {
+                let peer = msg.peer().ok_or_else(|| anyhow::anyhow!("no peer"))?;
+                let chat = match peer.to_ref().await.ok().flatten() {
+                    Some(c) => c,
+                    None => anyhow::bail!("no peer ref"),
+                };
+
+                tracing::info!(sender = sender_id, url, "auto-detected link download requested");
+                commands::dl::handle_dl(&state.client, chat, url, state).await?;
+            }
+            None => {}
+        }
         return Ok(());
     }
 
