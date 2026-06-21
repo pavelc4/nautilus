@@ -77,6 +77,63 @@ pub async fn handle_dl(
         .await?;
     let status_id = status_msg.id();
 
+    if let Some(cached) = state.media_cache.get(&url) {
+        let cached = cached.value();
+        if !cached.medias.is_empty() {
+            tracing::info!(url, "cache hit at bot level, sending cached media");
+            let _ = client
+                .edit_message(
+                    chat,
+                    status_id,
+                    InputMessage::new().text("Sending cached media..."),
+                )
+                .await;
+
+            let emoji = match cached.kind {
+                MediaKind::Video => "🎬",
+                MediaKind::Audio => "🎵",
+                MediaKind::Photo => "🖼️",
+                MediaKind::File => "📎",
+            };
+
+            let mut caption = String::new();
+            if let Some(ref t) = cached.title {
+                caption.push_str(&format!("{emoji} {t}\n\n"));
+            }
+            if let Some(ref desc) = cached.description {
+                caption.push_str(desc);
+                caption.push_str("\n\n");
+            }
+            caption.push_str(&format!(
+                "🦀 Powered by @{}",
+                state.bot_stats.bot_username()
+            ));
+
+            if cached.medias.len() == 1 {
+                let media = &cached.medias[0];
+                if let Some(im) = media.to_raw_input_media() {
+                    let msg = InputMessage::new().text(caption).media(im);
+                    let _ = client.send_message(chat, msg).await;
+                }
+            } else {
+                let mut album_medias = Vec::new();
+                for (idx, media) in cached.medias.iter().enumerate() {
+                    let mut input_media =
+                        grammers_client::media::InputMedia::new().copy_media(media);
+                    if idx == 0 {
+                        input_media = input_media.caption(&caption);
+                    }
+                    album_medias.push(input_media);
+                }
+                let _ = client.send_album(chat, album_medias).await;
+            }
+
+            let _ = client.delete_messages(chat, &[status_id]).await;
+            state.bot_stats.record_success();
+            return Ok(());
+        }
+    }
+
     tracing::info!(url, ?format, "resolving URL via provider chain");
     let items = match state.registry.resolve_and_fetch(&url, format).await {
         Ok(items) => items,
@@ -199,10 +256,16 @@ pub async fn handle_dl(
         uploads.push((uploaded, item.meta));
     }
 
+    let mut sent_medias = Vec::new();
+
     if total == 1 {
         let (uploaded, meta) = uploads.into_iter().next().unwrap();
         let media_msg = streaming::build_media_message(&caption, &meta, uploaded);
-        let _ = client.send_message(chat, media_msg).await;
+        if let Ok(msg) = client.send_message(chat, media_msg).await {
+            if let Some(m) = msg.media() {
+                sent_medias.push(m);
+            }
+        }
     } else {
         let mut photo_uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
             Vec::new();
@@ -240,28 +303,41 @@ pub async fn handle_dl(
                 )
                 .await;
 
-            let album_ok = {
-                let medias: Vec<_> = batch
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (uploaded, meta))| {
-                        let c = if i == 0 && is_last {
-                            caption.clone()
-                        } else {
-                            String::new()
-                        };
-                        streaming::build_media_input(&c, meta, uploaded.clone())
-                    })
-                    .collect();
-                client.send_album(chat, medias).await.is_ok()
-            };
+            let mut album_sent = false;
+            let medias: Vec<_> = batch
+                .iter()
+                .enumerate()
+                .map(|(i, (uploaded, meta))| {
+                    let c = if i == 0 && is_last {
+                        caption.clone()
+                    } else {
+                        String::new()
+                    };
+                    streaming::build_media_input(&c, meta, uploaded.clone())
+                })
+                .collect();
 
-            if !album_ok {
+            if let Ok(msgs) = client.send_album(chat, medias).await {
+                album_sent = true;
+                for msg_opt in msgs {
+                    if let Some(msg) = msg_opt {
+                        if let Some(m) = msg.media() {
+                            sent_medias.push(m);
+                        }
+                    }
+                }
+            }
+
+            if !album_sent {
                 tracing::warn!("send_album failed, sending individually");
                 for (i, (uploaded, meta)) in batch.into_iter().enumerate() {
                     let c = if is_last && i == 0 { &caption } else { "" };
                     let media_msg = streaming::build_media_message(c, &meta, uploaded);
-                    let _ = client.send_message(chat, media_msg).await;
+                    if let Ok(msg) = client.send_message(chat, media_msg).await {
+                        if let Some(m) = msg.media() {
+                            sent_medias.push(m);
+                        }
+                    }
                 }
             }
         }
@@ -277,8 +353,24 @@ pub async fn handle_dl(
                 .await;
             let c = if is_last { &caption } else { "" };
             let media_msg = streaming::build_media_message(c, &meta, uploaded);
-            let _ = client.send_message(chat, media_msg).await;
+            if let Ok(msg) = client.send_message(chat, media_msg).await {
+                if let Some(m) = msg.media() {
+                    sent_medias.push(m);
+                }
+            }
         }
+    }
+
+    if !sent_medias.is_empty() {
+        state.media_cache.insert(
+            url,
+            crate::app::CachedMedia {
+                medias: sent_medias,
+                title,
+                description,
+                kind,
+            },
+        );
     }
 
     let _ = client.delete_messages(chat, &[status_id]).await;

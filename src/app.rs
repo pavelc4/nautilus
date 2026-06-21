@@ -9,6 +9,14 @@ use crate::config::Config;
 use crate::provider::astra::AstraProvider;
 use crate::provider::registry::ProviderRegistry;
 
+#[derive(Clone)]
+pub struct CachedMedia {
+    pub medias: Vec<grammers_client::media::Media>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub kind: crate::provider::MediaKind,
+}
+
 pub struct AppState {
     pub client: Client,
     pub config: Arc<Config>,
@@ -16,6 +24,7 @@ pub struct AppState {
     pub bot_stats: BotStats,
     pub settings: SettingsMap,
     pub pending_downloads: Arc<dashmap::DashMap<String, String>>,
+    pub media_cache: Arc<dashmap::DashMap<String, CachedMedia>>,
 }
 
 impl AppState {
@@ -49,6 +58,7 @@ impl AppState {
             bot_stats: BotStats::new(session.bot_username, session.bot_id),
             settings: SettingsMap::new(),
             pending_downloads: Arc::new(dashmap::DashMap::new()),
+            media_cache: Arc::new(dashmap::DashMap::new()),
         });
 
         Ok((state, session.updates_rx))
