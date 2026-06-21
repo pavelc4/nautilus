@@ -7,14 +7,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::bot::settings::SettingsMap;
 use crate::bot::status::BotStats;
 use crate::config::Config;
+use crate::provider::astra::AstraProvider;
 use crate::provider::registry::ProviderRegistry;
-use crate::provider::scraper::ScraperProvider;
-use crate::provider::scraper::extractors::{
-    CapCutExtractor, InstagramExtractor, LinkedInExtractor, PinterestExtractor, RedditExtractor,
-    SoundCloudExtractor, SpotifyExtractor, TeraboxExtractor, ThreadsExtractor, TikTokExtractor,
-    TwitterExtractor,
-};
-use crate::provider::ytdlp::YtDlpProvider;
 
 pub struct AppState {
     pub client: Client,
@@ -37,26 +31,13 @@ impl AppState {
 
         let config = Arc::new(config);
 
-        let ytdlp = YtDlpProvider::new(config.ytdlp_cookies.clone());
+        let astra_url = config
+            .astra_api_url
+            .clone()
+            .unwrap_or_else(|| "http://localhost:3000".to_string());
+        let astra = AstraProvider::new(astra_url);
 
-        let scraper = ScraperProvider::new(vec![
-            Box::new(TikTokExtractor),
-            Box::new(InstagramExtractor::new(config.instagram_cookies.clone())),
-            Box::new(TwitterExtractor),
-            Box::new(ThreadsExtractor),
-            Box::new(RedditExtractor),
-            Box::new(PinterestExtractor),
-            Box::new(TeraboxExtractor),
-            Box::new(SpotifyExtractor),
-            Box::new(SoundCloudExtractor),
-            Box::new(CapCutExtractor),
-            Box::new(LinkedInExtractor),
-        ]);
-
-        let registry = Arc::new(ProviderRegistry::new(vec![
-            Box::new(ytdlp),
-            Box::new(scraper),
-        ]));
+        let registry = Arc::new(ProviderRegistry::new(vec![Box::new(astra)]));
 
         let max_jobs = config.max_concurrent_jobs();
         let job_semaphore = Arc::new(Semaphore::new(max_jobs));

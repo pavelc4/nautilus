@@ -1,5 +1,4 @@
-pub mod handler;
-pub mod ratelimit;
+pub mod commands;
 pub mod router;
 pub mod session;
 pub mod settings;

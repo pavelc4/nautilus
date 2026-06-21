@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use grammers_client::Client;
-use grammers_client::message::{InputMessage, Message};
+use grammers_client::message::InputMessage;
+use grammers_session::types::PeerRef;
 
 use crate::app::AppState;
 use crate::provider::MediaKind;
@@ -13,8 +14,15 @@ fn normalize_url(url: &str) -> String {
         Err(_) => return url.to_string(),
     };
     let tracking: [&str; 9] = [
-        "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-        "igsh", "igshid", "fbclid", "gclid",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "igsh",
+        "igshid",
+        "fbclid",
+        "gclid",
     ];
     let keep: Vec<_> = parsed
         .query_pairs()
@@ -39,20 +47,11 @@ fn normalize_url(url: &str) -> String {
 
 pub async fn handle_dl(
     client: &Client,
-    msg: &Message,
+    chat: PeerRef,
     url: &str,
     state: &Arc<AppState>,
 ) -> anyhow::Result<()> {
     let url = normalize_url(url);
-    let peer = msg
-        .peer()
-        .ok_or_else(|| anyhow::anyhow!("no peer in message"))?;
-    let chat = peer
-        .to_ref()
-        .await
-        .ok()
-        .flatten()
-        .ok_or_else(|| anyhow::anyhow!("no peer ref"))?;
 
     let status_msg = client
         .send_message(chat, InputMessage::new().text("Resolving URL..."))
@@ -65,7 +64,11 @@ pub async fn handle_dl(
         Err(e) => {
             state.bot_stats.record_failure();
             let _ = client
-                .edit_message(chat, status_id, InputMessage::new().text(format!("Error: {e}")))
+                .edit_message(
+                    chat,
+                    status_id,
+                    InputMessage::new().text(format!("Error: {e}")),
+                )
                 .await;
             return Err(e);
         }
@@ -73,7 +76,11 @@ pub async fn handle_dl(
 
     if items.is_empty() {
         let _ = client
-            .edit_message(chat, status_id, InputMessage::new().text("Error: no media found"))
+            .edit_message(
+                chat,
+                status_id,
+                InputMessage::new().text("Error: no media found"),
+            )
             .await;
         return Err(anyhow::anyhow!("no media found"));
     }
@@ -87,7 +94,11 @@ pub async fn handle_dl(
                 state.config.max_file_size_bytes()
             );
             let _ = client
-                .edit_message(chat, status_id, InputMessage::new().text(format!("Error: {err}")))
+                .edit_message(
+                    chat,
+                    status_id,
+                    InputMessage::new().text(format!("Error: {err}")),
+                )
                 .await;
             return Err(err);
         }
@@ -113,18 +124,31 @@ pub async fn handle_dl(
         caption.push_str(desc);
         caption.push_str("\n\n");
     }
-    caption.push_str(&format!("🦀 Powered by @{}", state.bot_stats.bot_username()));
+    caption.push_str(&format!(
+        "🦀 Powered by @{}",
+        state.bot_stats.bot_username()
+    ));
 
-    let mut uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> = Vec::with_capacity(total);
+    let mut uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
+        Vec::with_capacity(total);
     for (i, item) in items.into_iter().enumerate() {
         let _ = client
             .edit_message(
                 chat,
                 status_id,
                 InputMessage::new().text(if total > 1 {
-                    format!("Uploading {}/{}: {} ({} bytes)", i + 1, total, item.meta.filename, item.meta.size)
+                    format!(
+                        "Uploading {}/{}: {} ({} bytes)",
+                        i + 1,
+                        total,
+                        item.meta.filename,
+                        item.meta.size
+                    )
                 } else {
-                    format!("Uploading: {} ({} bytes)", item.meta.filename, item.meta.size)
+                    format!(
+                        "Uploading: {} ({} bytes)",
+                        item.meta.filename, item.meta.size
+                    )
                 }),
             )
             .await;
@@ -151,7 +175,11 @@ pub async fn handle_dl(
             Err(e) => {
                 state.bot_stats.record_failure();
                 let _ = client
-                    .edit_message(chat, status_id, InputMessage::new().text(format!("Upload {}/{} failed: {e}", i + 1, total)))
+                    .edit_message(
+                        chat,
+                        status_id,
+                        InputMessage::new().text(format!("Upload {}/{} failed: {e}", i + 1, total)),
+                    )
                     .await;
                 return Err(e);
             }
@@ -165,8 +193,10 @@ pub async fn handle_dl(
         let media_msg = streaming::build_media_message(&caption, &meta, uploaded);
         let _ = client.send_message(chat, media_msg).await;
     } else {
-        let mut photo_uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> = Vec::new();
-        let mut other_uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> = Vec::new();
+        let mut photo_uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
+            Vec::new();
+        let mut other_uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
+            Vec::new();
         for item in uploads {
             if item.1.kind == MediaKind::Photo {
                 photo_uploads.push(item);
@@ -177,7 +207,9 @@ pub async fn handle_dl(
 
         const ALBUM_MAX: usize = 10;
 
-        let mut photo_batches: Vec<Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)>> = Vec::new();
+        let mut photo_batches: Vec<
+            Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)>,
+        > = Vec::new();
         while !photo_uploads.is_empty() {
             let batch_size = ALBUM_MAX.min(photo_uploads.len());
             let batch: Vec<_> = photo_uploads.drain(..batch_size).collect();
@@ -190,14 +222,26 @@ pub async fn handle_dl(
         for (batch_idx, batch) in photo_batches.into_iter().enumerate() {
             let is_last = batch_idx + 1 == total_sends;
             let _ = client
-                .edit_message(chat, status_id, InputMessage::new().text(format!("Sending album ({} photos)...", batch.len())))
+                .edit_message(
+                    chat,
+                    status_id,
+                    InputMessage::new().text(format!("Sending album ({} photos)...", batch.len())),
+                )
                 .await;
 
             let album_ok = {
-                let medias: Vec<_> = batch.iter().enumerate().map(|(i, (uploaded, meta))| {
-                    let c = if i == 0 && is_last { caption.clone() } else { String::new() };
-                    streaming::build_media_input(&c, meta, uploaded.clone())
-                }).collect();
+                let medias: Vec<_> = batch
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (uploaded, meta))| {
+                        let c = if i == 0 && is_last {
+                            caption.clone()
+                        } else {
+                            String::new()
+                        };
+                        streaming::build_media_input(&c, meta, uploaded.clone())
+                    })
+                    .collect();
                 client.send_album(chat, medias).await.is_ok()
             };
 
@@ -214,7 +258,11 @@ pub async fn handle_dl(
         for (i, (uploaded, meta)) in other_uploads.into_iter().enumerate() {
             let is_last = total_albums + i + 1 == total_sends;
             let _ = client
-                .edit_message(chat, status_id, InputMessage::new().text(format!("Sending: {}", meta.filename)))
+                .edit_message(
+                    chat,
+                    status_id,
+                    InputMessage::new().text(format!("Sending: {}", meta.filename)),
+                )
                 .await;
             let c = if is_last { &caption } else { "" };
             let media_msg = streaming::build_media_message(c, &meta, uploaded);

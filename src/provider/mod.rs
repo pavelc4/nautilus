@@ -1,6 +1,5 @@
+pub mod astra;
 pub mod registry;
-pub mod scraper;
-pub mod ytdlp;
 
 use std::pin::Pin;
 
