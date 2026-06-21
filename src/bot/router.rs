@@ -323,6 +323,7 @@ async fn handle_message(
         "/audio",
         "/start",
         "/stats",
+        "/check",
         "/help",
         "/about",
     ];
@@ -380,6 +381,10 @@ async fn handle_message(
         }
         "/about" => {
             let reply = commands::about::cmd_about();
+            state.client.send_message(chat, reply).await?;
+        }
+        "/check" => {
+            let reply = commands::check::cmd_check(state).await?;
             state.client.send_message(chat, reply).await?;
         }
         _ => {}
