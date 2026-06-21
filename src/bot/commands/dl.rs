@@ -322,19 +322,23 @@ pub async fn handle_dl(
                 })
                 .collect();
 
-            if let Ok(msgs) = client.send_album(chat, medias).await {
-                album_sent = true;
-                for msg_opt in msgs {
-                    if let Some(msg) = msg_opt {
-                        if let Some(m) = msg.media() {
-                            sent_medias.push(m);
+            match client.send_album(chat, medias).await {
+                Ok(msgs) => {
+                    album_sent = true;
+                    for msg_opt in msgs {
+                        if let Some(msg) = msg_opt {
+                            if let Some(m) = msg.media() {
+                                sent_medias.push(m);
+                            }
                         }
                     }
+                }
+                Err(e) => {
+                    tracing::warn!("send_album failed: {e:#}, sending individually");
                 }
             }
 
             if !album_sent {
-                tracing::warn!("send_album failed, sending individually");
                 for (i, (uploaded, meta)) in batch.into_iter().enumerate() {
                     let c = if is_last && i == 0 { &caption } else { "" };
                     let media_msg = streaming::build_media_message(c, &meta, uploaded);
