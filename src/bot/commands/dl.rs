@@ -95,7 +95,6 @@ pub async fn handle_dl(
                 )
                 .await;
 
-            let mut caption = String::new();
             let mut quote_content = String::new();
             if let Some(ref t) = cached.title {
                 let escaped_t = html_escape(t);
@@ -106,9 +105,6 @@ pub async fn handle_dl(
                 quote_content.push_str(&escaped_desc);
             }
             let quote_content = quote_content.trim();
-            if !quote_content.is_empty() {
-                caption.push_str(&format!("<blockquote>{quote_content}</blockquote>\n\n"));
-            }
 
             let type_str = match cached.kind {
                 MediaKind::Video => "Video",
@@ -123,21 +119,40 @@ pub async fn handle_dl(
                 .sum();
             let size_mb = (total_size as f64) / (1024.0 * 1024.0);
 
-            caption.push_str(&format!("🔗 Sumber: {}\n", get_source_link(&url)));
-            caption.push_str(&format!("🏷 Tipe: {type_str}\n"));
-            caption.push_str(&format!("💾 Ukuran: {:.2} MB\n", size_mb));
+            let mut metadata = String::new();
+            metadata.push_str(&format!("🔗 Sumber: {}\n", get_source_link(&url)));
+            metadata.push_str(&format!("🏷 Tipe: {type_str}\n"));
+            metadata.push_str(&format!("💾 Ukuran: {:.2} MB\n", size_mb));
             if let Some(ref name) = sender_name {
-                caption.push_str(&format!("👤 Oleh: {name}\n"));
+                metadata.push_str(&format!("👤 Oleh: {name}\n"));
             }
-            caption.push_str(
+            metadata.push_str(
                 "\n😼 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>",
             );
 
+            let caption;
+            let mut separate_text = None;
+
+            if !quote_content.is_empty() {
+                let blockquote = format!("<blockquote>{quote_content}</blockquote>\n\n");
+                if blockquote.chars().count() + metadata.chars().count() > 1000 {
+                    caption = metadata;
+                    separate_text = Some(blockquote);
+                } else {
+                    caption = format!("{}{}", blockquote, metadata);
+                }
+            } else {
+                caption = metadata;
+            }
+
+            let mut sent_any = false;
             if cached.medias.len() == 1 {
                 let media = &cached.medias[0];
                 if let Some(im) = media.to_raw_input_media() {
                     let msg = InputMessage::new().html(caption).media(im);
-                    let _ = client.send_message(chat, msg).await;
+                    if client.send_message(chat, msg).await.is_ok() {
+                        sent_any = true;
+                    }
                 }
             } else {
                 let mut album_medias = Vec::new();
@@ -149,7 +164,15 @@ pub async fn handle_dl(
                     }
                     album_medias.push(input_media);
                 }
-                let _ = client.send_album(chat, album_medias).await;
+                if client.send_album(chat, album_medias).await.is_ok() {
+                    sent_any = true;
+                }
+            }
+
+            if sent_any && let Some(ref sep) = separate_text {
+                let _ = client
+                    .send_message(chat, InputMessage::new().html(sep))
+                    .await;
             }
 
             let _ = client.delete_messages(chat, &[status_id]).await;
@@ -213,7 +236,6 @@ pub async fn handle_dl(
     let title = items[0].meta.title.clone();
     let description = items[0].meta.description.clone();
 
-    let mut caption = String::new();
     let mut quote_content = String::new();
     if let Some(ref t) = title {
         let escaped_t = html_escape(t);
@@ -224,9 +246,6 @@ pub async fn handle_dl(
         quote_content.push_str(&escaped_desc);
     }
     let quote_content = quote_content.trim();
-    if !quote_content.is_empty() {
-        caption.push_str(&format!("<blockquote>{quote_content}</blockquote>\n\n"));
-    }
 
     let type_str = match kind {
         MediaKind::Video => "Video",
@@ -237,13 +256,29 @@ pub async fn handle_dl(
     let total_size: u64 = items.iter().map(|item| item.meta.size).sum();
     let size_mb = (total_size as f64) / (1024.0 * 1024.0);
 
-    caption.push_str(&format!("🖇️ Source: {}\n", get_source_link(&url)));
-    caption.push_str(&format!("📄 Type: {type_str}\n"));
-    caption.push_str(&format!("📁 Size: {:.2} MB\n", size_mb));
+    let mut metadata = String::new();
+    metadata.push_str(&format!("🖇️ Source: {}\n", get_source_link(&url)));
+    metadata.push_str(&format!("📄 Type: {type_str}\n"));
+    metadata.push_str(&format!("📁 Size: {:.2} MB\n", size_mb));
     if let Some(ref name) = sender_name {
-        caption.push_str(&format!("👤 By: {name}\n"));
+        metadata.push_str(&format!("👤 By: {name}\n"));
     }
-    caption.push_str("\n💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>");
+    metadata.push_str("\n💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>");
+
+    let caption;
+    let mut separate_text = None;
+
+    if !quote_content.is_empty() {
+        let blockquote = format!("<blockquote>{quote_content}</blockquote>\n\n");
+        if blockquote.chars().count() + metadata.chars().count() > 1000 {
+            caption = metadata;
+            separate_text = Some(blockquote);
+        } else {
+            caption = format!("{}{}", blockquote, metadata);
+        }
+    } else {
+        caption = metadata;
+    }
 
     let mut uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
         Vec::with_capacity(total);
@@ -297,23 +332,38 @@ pub async fn handle_dl(
     }
 
     let mut sent_medias = Vec::new();
+    let mut caption_to_send = Some(caption.clone());
 
     if total == 1 {
         let (uploaded, meta) = uploads.into_iter().next().unwrap();
-        let media_msg = streaming::build_media_message(&caption, &meta, uploaded);
-        if let Ok(msg) = client.send_message(chat, media_msg).await
-            && let Some(m) = msg.media()
-        {
-            sent_medias.push(m);
+        let c = caption_to_send.take().unwrap_or_default();
+        let media_msg = streaming::build_media_message(&c, &meta, uploaded);
+        match client.send_message(chat, media_msg).await {
+            Ok(msg) => {
+                if let Some(m) = msg.media() {
+                    sent_medias.push(m);
+                }
+            }
+            Err(e) => {
+                state.bot_stats.record_failure();
+                let _ = client
+                    .edit_message(
+                        chat,
+                        status_id,
+                        InputMessage::new().text(format!("Failed to send media: {e}")),
+                    )
+                    .await;
+                return Err(e.into());
+            }
         }
     } else {
-        let mut photo_uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
+        let mut album_uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
             Vec::new();
         let mut other_uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
             Vec::new();
         for item in uploads {
-            if item.1.kind == MediaKind::Photo {
-                photo_uploads.push(item);
+            if item.1.kind == MediaKind::Photo || item.1.kind == MediaKind::Video {
+                album_uploads.push(item);
             } else {
                 other_uploads.push(item);
             }
@@ -321,25 +371,32 @@ pub async fn handle_dl(
 
         const ALBUM_MAX: usize = 10;
 
-        let mut photo_batches: Vec<
+        let mut album_batches: Vec<
             Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)>,
         > = Vec::new();
-        while !photo_uploads.is_empty() {
-            let batch_size = ALBUM_MAX.min(photo_uploads.len());
-            let batch: Vec<_> = photo_uploads.drain(..batch_size).collect();
-            photo_batches.push(batch);
+        while !album_uploads.is_empty() {
+            let batch_size = if album_uploads.len() == 11 {
+                9
+            } else if album_uploads.len() == 1 {
+                other_uploads.push(album_uploads.remove(0));
+                break;
+            } else {
+                ALBUM_MAX.min(album_uploads.len())
+            };
+            let batch: Vec<_> = album_uploads.drain(..batch_size).collect();
+            album_batches.push(batch);
         }
 
-        let total_albums = photo_batches.len();
+        let total_albums = album_batches.len();
         let total_sends = total_albums + other_uploads.len();
 
-        for (batch_idx, batch) in photo_batches.into_iter().enumerate() {
+        for (batch_idx, batch) in album_batches.into_iter().enumerate() {
             let is_last = batch_idx + 1 == total_sends;
             let _ = client
                 .edit_message(
                     chat,
                     status_id,
-                    InputMessage::new().text(format!("Sending album ({} photos)...", batch.len())),
+                    InputMessage::new().text(format!("Sending album ({} media)...", batch.len())),
                 )
                 .await;
 
@@ -349,7 +406,7 @@ pub async fn handle_dl(
                 .enumerate()
                 .map(|(i, (uploaded, meta))| {
                     let c = if i == 0 && is_last {
-                        caption.clone()
+                        caption_to_send.clone().unwrap_or_default()
                     } else {
                         String::new()
                     };
@@ -360,6 +417,9 @@ pub async fn handle_dl(
             match client.send_album(chat, medias).await {
                 Ok(msgs) => {
                     album_sent = true;
+                    if is_last {
+                        caption_to_send = None;
+                    }
                     for msg_opt in msgs {
                         if let Some(msg) = msg_opt
                             && let Some(m) = msg.media()
@@ -374,13 +434,25 @@ pub async fn handle_dl(
             }
 
             if !album_sent {
-                for (i, (uploaded, meta)) in batch.into_iter().enumerate() {
-                    let c = if is_last && i == 0 { &caption } else { "" };
-                    let media_msg = streaming::build_media_message(c, &meta, uploaded);
-                    if let Ok(msg) = client.send_message(chat, media_msg).await
-                        && let Some(m) = msg.media()
-                    {
-                        sent_medias.push(m);
+                for (uploaded, meta) in batch {
+                    let c = if is_last && caption_to_send.is_some() {
+                        caption_to_send.take().unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    let media_msg = streaming::build_media_message(&c, &meta, uploaded);
+                    match client.send_message(chat, media_msg).await {
+                        Ok(msg) => {
+                            if let Some(m) = msg.media() {
+                                sent_medias.push(m);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("failed to send individual media in fallback: {e:#}");
+                            if !c.is_empty() {
+                                caption_to_send = Some(c);
+                            }
+                        }
                     }
                 }
             }
@@ -395,27 +467,63 @@ pub async fn handle_dl(
                     InputMessage::new().text(format!("Sending: {}", meta.filename)),
                 )
                 .await;
-            let c = if is_last { &caption } else { "" };
-            let media_msg = streaming::build_media_message(c, &meta, uploaded);
-            if let Ok(msg) = client.send_message(chat, media_msg).await
-                && let Some(m) = msg.media()
-            {
-                sent_medias.push(m);
+            let c = if is_last && caption_to_send.is_some() {
+                caption_to_send.take().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let media_msg = streaming::build_media_message(&c, &meta, uploaded);
+            match client.send_message(chat, media_msg).await {
+                Ok(msg) => {
+                    if let Some(m) = msg.media() {
+                        sent_medias.push(m);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("failed to send individual other_upload: {e:#}");
+                    if !c.is_empty() {
+                        caption_to_send = Some(c);
+                    }
+                }
             }
         }
     }
 
-    if !sent_medias.is_empty() {
-        state.media_cache.insert(
-            cache_key,
-            crate::app::CachedMedia {
-                medias: sent_medias,
-                title,
-                description,
-                kind,
-            },
-        );
+    if sent_medias.is_empty() {
+        state.bot_stats.record_failure();
+        let _ = client
+            .edit_message(
+                chat,
+                status_id,
+                InputMessage::new().text("Failed to send any resolved media to chat."),
+            )
+            .await;
+        return Err(anyhow::anyhow!("failed to send any media"));
     }
+
+    if let Some(ref cap) = caption_to_send
+        && !cap.is_empty()
+    {
+        let _ = client
+            .send_message(chat, InputMessage::new().html(cap))
+            .await;
+    }
+
+    if let Some(ref sep) = separate_text {
+        let _ = client
+            .send_message(chat, InputMessage::new().html(sep))
+            .await;
+    }
+
+    state.media_cache.insert(
+        cache_key,
+        crate::app::CachedMedia {
+            medias: sent_medias,
+            title,
+            description,
+            kind,
+        },
+    );
 
     let _ = client.delete_messages(chat, &[status_id]).await;
     state.bot_stats.record_success();

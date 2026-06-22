@@ -29,18 +29,34 @@ pub async fn fetch_stream(
     client: &reqwest::Client,
     url: &str,
 ) -> anyhow::Result<(u64, MediaReader)> {
-    let resp = client.get(url).send().await?;
+    let resp = client
+        .get(url)
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .send()
+        .await?;
     if !resp.status().is_success() {
         anyhow::bail!("Failed to fetch stream from CDN: {}", resp.status());
     }
-    let size = resp.content_length().unwrap_or(0);
+    let mut size = resp.content_length().unwrap_or(0);
     let stream = resp
         .bytes_stream()
         .map(|r| r.map_err(std::io::Error::other));
     let stream_reader = tokio_util::io::StreamReader::new(stream);
-    let buffered = tokio::io::BufReader::with_capacity(128 * 1024, stream_reader);
-    let reader: MediaReader = Box::pin(buffered);
-    Ok((size, reader))
+
+    if size == 0 {
+        use tokio::io::AsyncReadExt;
+        let mut buf_reader = tokio::io::BufReader::new(stream_reader);
+        let mut buffer = Vec::new();
+        buf_reader.read_to_end(&mut buffer).await?;
+        size = buffer.len() as u64;
+        let cursor = std::io::Cursor::new(buffer);
+        let reader: MediaReader = Box::pin(cursor);
+        Ok((size, reader))
+    } else {
+        let buffered = tokio::io::BufReader::with_capacity(128 * 1024, stream_reader);
+        let reader: MediaReader = Box::pin(buffered);
+        Ok((size, reader))
+    }
 }
 
 pub async fn download_item(

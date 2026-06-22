@@ -236,27 +236,40 @@ async fn handle_message(
 
                     let mut buttons = Vec::new();
                     let mut media_row = Vec::new();
+
+                    let has_both = info.has_video && info.has_photo;
+
                     if info.has_video {
                         media_row.push(grammers_client::message::Button::data(
                             "Video",
                             format!("dl:video:{}", id),
                         ));
                     }
-                    if info.has_audio {
+                    if info.has_photo {
                         media_row.push(grammers_client::message::Button::data(
-                            "Audio",
-                            format!("dl:audio:{}", id),
+                            "Photo",
+                            format!("dl:photo:{}", id),
                         ));
                     }
                     if !media_row.is_empty() {
                         buttons.push(media_row);
                     }
 
-                    if info.has_photo {
-                        buttons.push(vec![grammers_client::message::Button::data(
-                            "Photo",
-                            format!("dl:photo:{}", id),
-                        )]);
+                    let mut extra_row = Vec::new();
+                    if has_both {
+                        extra_row.push(grammers_client::message::Button::data(
+                            "Download All",
+                            format!("dl:both:{}", id),
+                        ));
+                    }
+                    if info.has_audio {
+                        extra_row.push(grammers_client::message::Button::data(
+                            "Audio",
+                            format!("dl:audio:{}", id),
+                        ));
+                    }
+                    if !extra_row.is_empty() {
+                        buttons.push(extra_row);
                     }
 
                     buttons.push(vec![grammers_client::message::Button::data(

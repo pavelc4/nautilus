@@ -69,41 +69,25 @@ impl Provider for AstraProvider {
 
         let mut items = Vec::new();
 
+        let wants_video = format == Some("video") || format.is_none() || format == Some("both") || format == Some("all");
+        let wants_photo = format == Some("photo") || format.is_none() || format == Some("both") || format == Some("all");
+
         if let Some(ref downloads) = data.downloads {
-            // Find all kinds of downloads
-            let video_items: Vec<_> = downloads
-                .iter()
-                .filter(|d| d.media_type == AstraMediaType::Video)
-                .collect();
+            let has_video_or_photo = downloads.iter().any(|d| {
+                d.media_type == AstraMediaType::Video
+                    || d.media_type == AstraMediaType::Image
+                    || d.media_type == AstraMediaType::Slide
+            });
+            let wants_audio = format == Some("audio") || (format.is_none() && !has_video_or_photo);
 
-            let slideshow_items: Vec<_> = downloads
-                .iter()
-                .filter(|d| {
-                    d.media_type == AstraMediaType::Image || d.media_type == AstraMediaType::Slide
-                })
-                .collect();
-
-            let audio_items: Vec<_> = downloads
-                .iter()
-                .filter(|d| d.media_type == AstraMediaType::Audio)
-                .collect();
-
-            let mut format_to_use = format;
-            if format_to_use.is_none() {
+            if wants_video {
+                let video_items: Vec<_> = downloads
+                    .iter()
+                    .filter(|d| d.media_type == AstraMediaType::Video)
+                    .collect();
                 if !video_items.is_empty() {
-                    format_to_use = Some("video");
-                } else if !slideshow_items.is_empty() {
-                    format_to_use = Some("photo");
-                } else if !audio_items.is_empty() {
-                    format_to_use = Some("audio");
-                }
-            }
-
-            match format_to_use {
-                Some("video") if !video_items.is_empty() => {
                     let selected_video = match platform {
                         "youtube" => {
-                            // Look for a combined format (label does not contain "no audio")
                             let combined_videos: Vec<_> = video_items
                                 .iter()
                                 .filter(|v| {
@@ -113,7 +97,6 @@ impl Provider for AstraProvider {
                                 .collect();
 
                             if !combined_videos.is_empty() {
-                                // Find the one with highest quality
                                 combined_videos
                                     .into_iter()
                                     .max_by_key(|v| {
@@ -121,14 +104,12 @@ impl Provider for AstraProvider {
                                     })
                                     .copied()
                             } else {
-                                // Fallback to highest quality overall video
                                 video_items.into_iter().max_by_key(|v| {
                                     parse_quality(v.quality.as_deref().unwrap_or(""))
                                 })
                             }
                         }
                         "tiktok" => {
-                            // Look for No Watermark -> HD -> Original -> With Watermark -> first
                             video_items
                                 .iter()
                                 .find(|v| v.label.as_deref() == Some("No Watermark"))
@@ -150,12 +131,9 @@ impl Provider for AstraProvider {
                                 .or_else(|| video_items.first())
                                 .copied()
                         }
-                        _ => {
-                            // Pick highest quality or first
-                            video_items
-                                .into_iter()
-                                .max_by_key(|v| parse_quality(v.quality.as_deref().unwrap_or("")))
-                        }
+                        _ => video_items
+                            .into_iter()
+                            .max_by_key(|v| parse_quality(v.quality.as_deref().unwrap_or(""))),
                     };
 
                     if let Some(v) = selected_video {
@@ -175,51 +153,60 @@ impl Provider for AstraProvider {
                         items.push(media_item);
                     }
                 }
-                Some("photo") if !slideshow_items.is_empty() => {
-                    for (idx, item) in slideshow_items.into_iter().enumerate() {
-                        let sanitized =
-                            sanitize_filename(title.as_deref().unwrap_or("image"), "image");
-                        let filename = format!("{sanitized}_{idx}.jpg");
-                        let media_item = download_item(
-                            &self.client,
-                            item.url.clone(),
-                            MediaKind::Photo,
-                            "image/jpeg".into(),
-                            filename,
-                            title.clone(),
-                            description.clone(),
-                        )
-                        .await?;
-                        items.push(media_item);
-                    }
+            }
+
+            if wants_photo {
+                let slideshow_items: Vec<_> = downloads
+                    .iter()
+                    .filter(|d| {
+                        d.media_type == AstraMediaType::Image || d.media_type == AstraMediaType::Slide
+                    })
+                    .collect();
+                for (idx, item) in slideshow_items.into_iter().enumerate() {
+                    let sanitized =
+                        sanitize_filename(title.as_deref().unwrap_or("image"), "image");
+                    let filename = format!("{sanitized}_{idx}.jpg");
+                    let media_item = download_item(
+                        &self.client,
+                        item.url.clone(),
+                        MediaKind::Photo,
+                        "image/jpeg".into(),
+                        filename,
+                        title.clone(),
+                        description.clone(),
+                    )
+                    .await?;
+                    items.push(media_item);
                 }
-                Some("audio") if !audio_items.is_empty() => {
-                    if let Some(a) = audio_items.first() {
-                        let sanitized =
-                            sanitize_filename(title.as_deref().unwrap_or("audio"), "audio");
-                        let filename = format!("{sanitized}.mp3");
-                        let media_item = download_item(
-                            &self.client,
-                            a.url.clone(),
-                            MediaKind::Audio,
-                            "audio/mpeg".into(),
-                            filename,
-                            title.clone(),
-                            description.clone(),
-                        )
-                        .await?;
-                        items.push(media_item);
-                    }
+            }
+
+            if wants_audio {
+                let audio_items: Vec<_> = downloads
+                    .iter()
+                    .filter(|d| d.media_type == AstraMediaType::Audio)
+                    .collect();
+                if let Some(a) = audio_items.first() {
+                    let sanitized =
+                        sanitize_filename(title.as_deref().unwrap_or("audio"), "audio");
+                    let filename = format!("{sanitized}.mp3");
+                    let media_item = download_item(
+                        &self.client,
+                        a.url.clone(),
+                        MediaKind::Audio,
+                        "audio/mpeg".into(),
+                        filename,
+                        title.clone(),
+                        description.clone(),
+                    )
+                    .await?;
+                    items.push(media_item);
                 }
-                _ => {}
             }
         }
 
         // If no downloads items resolved but we have photos and videos array (Meta/Instagram/Facebook/Threads carousels)
         if items.is_empty() {
             let mut extracted_media = Vec::new();
-            let wants_photo = format.is_none() || format == Some("photo");
-            let wants_video = format.is_none() || format == Some("video");
 
             if wants_photo {
                 for (idx, p) in data.photos.iter().flatten().enumerate() {
