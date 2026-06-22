@@ -23,6 +23,10 @@ pub struct AppState {
     pub bot_stats: BotStats,
     pub pending_downloads: Arc<dashmap::DashMap<String, String>>,
     pub media_cache: Arc<dashmap::DashMap<String, CachedMedia>>,
+    /// Shared HTTP client for lightweight diagnostic calls (/check, /status, /speedtest).
+    /// Per-call timeouts are applied per-request via `.timeout(..)` on the builder, so a
+    /// single connection pool + TLS state is reused instead of rebuilt on every command.
+    pub http: reqwest::Client,
 }
 
 impl AppState {
@@ -49,6 +53,11 @@ impl AppState {
             config.max_file_size_bytes()
         );
 
+        let http = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
         let state = Arc::new(Self {
             client: session.client,
             config,
@@ -56,6 +65,7 @@ impl AppState {
             bot_stats: BotStats::new(session.bot_username, session.bot_id),
             pending_downloads: Arc::new(dashmap::DashMap::new()),
             media_cache: Arc::new(dashmap::DashMap::new()),
+            http,
         });
 
         Ok((state, session.updates_rx))

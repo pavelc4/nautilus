@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use std::time::Duration;
-use serde::Deserialize;
 use crate::app::AppState;
 use grammers_client::message::InputMessage;
+use serde::Deserialize;
+use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Deserialize)]
 struct AstraHealthResponse {
@@ -29,33 +29,46 @@ pub async fn cmd_check(state: &Arc<AppState>) -> anyhow::Result<InputMessage> {
         .as_deref()
         .unwrap_or("http://localhost:3000");
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-
-    let response = client
+    let response = state
+        .http
         .get(format!("{}/health", api_url))
+        .timeout(Duration::from_secs(2))
         .send()
         .await;
 
     let (api_online, ig_loaded, fb_loaded, uptime, go_ver) = match response {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<AstraHealthResponse>().await {
-                Ok(payload) => match payload.data {
-                    Some(data) => (
-                        true,
-                        data.cookies.instagram,
-                        data.cookies.facebook,
-                        data.uptime,
-                        data.version,
-                    ),
-                    None => (true, false, false, "unknown".to_string(), "unknown".to_string()),
-                },
-                Err(_) => (true, false, false, "unknown".to_string(), "unknown".to_string()),
-            }
-        }
-        _ => (false, false, false, "offline".to_string(), "offline".to_string()),
+        Ok(resp) if resp.status().is_success() => match resp.json::<AstraHealthResponse>().await {
+            Ok(payload) => match payload.data {
+                Some(data) => (
+                    true,
+                    data.cookies.instagram,
+                    data.cookies.facebook,
+                    data.uptime,
+                    data.version,
+                ),
+                None => (
+                    true,
+                    false,
+                    false,
+                    "unknown".to_string(),
+                    "unknown".to_string(),
+                ),
+            },
+            Err(_) => (
+                true,
+                false,
+                false,
+                "unknown".to_string(),
+                "unknown".to_string(),
+            ),
+        },
+        _ => (
+            false,
+            false,
+            false,
+            "offline".to_string(),
+            "offline".to_string(),
+        ),
     };
 
     let api_status = match (api_online, &go_ver[..]) {
@@ -105,8 +118,16 @@ pub async fn cmd_check(state: &Arc<AppState>) -> anyhow::Result<InputMessage> {
         ig_status,
         fb_status,
         platform_status,
-        if ig_loaded { "Operational" } else { "Limited (No Cookies)" },
-        if fb_loaded { "Operational" } else { "Limited (No Cookies)" },
+        if ig_loaded {
+            "Operational"
+        } else {
+            "Limited (No Cookies)"
+        },
+        if fb_loaded {
+            "Operational"
+        } else {
+            "Limited (No Cookies)"
+        },
         platform_status,
         platform_status,
         platform_status,

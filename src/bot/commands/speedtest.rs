@@ -1,15 +1,19 @@
-use std::time::{Duration, Instant};
 use grammers_client::message::InputMessage;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-pub async fn cmd_speedtest() -> anyhow::Result<InputMessage> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+use crate::app::AppState;
+
+pub async fn cmd_speedtest(state: &Arc<AppState>) -> anyhow::Result<InputMessage> {
+    let client = &state.http;
 
     // 1. Latency Check
     let start_ping = Instant::now();
-    let ping_resp = client.get("https://speed.cloudflare.com/").send().await;
+    let ping_resp = client
+        .get("https://speed.cloudflare.com/")
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await;
     let latency_ms = match ping_resp {
         Ok(_) => Some(start_ping.elapsed().as_micros() as f64 / 1000.0),
         Err(_) => None,
@@ -18,6 +22,7 @@ pub async fn cmd_speedtest() -> anyhow::Result<InputMessage> {
     // 2. Download Speed (10MB test, max 3 seconds timeout)
     let down_resp = client
         .get("https://speed.cloudflare.com/__down?bytes=10485760")
+        .timeout(Duration::from_secs(5))
         .send()
         .await;
 
@@ -53,6 +58,7 @@ pub async fn cmd_speedtest() -> anyhow::Result<InputMessage> {
     let up_resp = client
         .post("https://speed.cloudflare.com/__up")
         .body(upload_data)
+        .timeout(Duration::from_secs(5))
         .send()
         .await;
 
@@ -93,9 +99,7 @@ pub async fn cmd_speedtest() -> anyhow::Result<InputMessage> {
          ├ Latency: {}\n\
          ├ Download: {}\n\
          └ Upload: {}",
-        latency_str,
-        down_str,
-        up_str
+        latency_str, down_str, up_str
     );
 
     Ok(InputMessage::new().text(text))

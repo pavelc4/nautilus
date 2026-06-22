@@ -165,13 +165,13 @@ fn format_memory(mb: f64) -> String {
     }
 }
 
-async fn query_astra_health(api_url: &str) -> String {
-    let client = reqwest::Client::builder()
+async fn query_astra_health(client: &reqwest::Client, api_url: &str) -> String {
+    let resp = match client
+        .get(format!("{}/health", api_url))
         .timeout(Duration::from_secs(2))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-
-    let resp = match client.get(format!("{}/health", api_url)).send().await {
+        .send()
+        .await
+    {
         Ok(r) => r,
         Err(e) => return format!("\u{2514} Offline (Connection error: {})", e),
     };
@@ -328,7 +328,11 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
         100.0
     };
     let success_filled = ((success_rate / 10.0).floor() as usize).clamp(0, 10);
-    let success_bar = format!("{}{}", "#".repeat(success_filled), "-".repeat(10 - success_filled));
+    let success_bar = format!(
+        "{}{}",
+        "#".repeat(success_filled),
+        "-".repeat(10 - success_filled)
+    );
 
     let cache_ratio = if processed > 0 {
         (cache_hits as f64 / processed as f64) * 100.0
@@ -336,14 +340,18 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
         0.0
     };
     let cache_filled = ((cache_ratio / 10.0).floor() as usize).clamp(0, 10);
-    let cache_bar = format!("{}{}", "#".repeat(cache_filled), "-".repeat(10 - cache_filled));
+    let cache_bar = format!(
+        "{}{}",
+        "#".repeat(cache_filled),
+        "-".repeat(10 - cache_filled)
+    );
 
     let astra_url = state
         .config
         .astra_api_url
         .as_deref()
         .unwrap_or("http://localhost:3000");
-    let astra_status = query_astra_health(astra_url).await;
+    let astra_status = query_astra_health(&state.http, astra_url).await;
 
     let text = format!(
         "⚡️ <b>Nautilus Status Dashboard</b> (Ping: {ping_ms:.0}ms)\n\n\

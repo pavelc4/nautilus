@@ -61,7 +61,8 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                     let parts: Vec<&str> = data.split(':').collect();
                     match parts.as_slice() {
                         [_, format, id] => {
-                            let url_opt = state.pending_downloads.get(*id).map(|r| r.value().clone());
+                            let url_opt =
+                                state.pending_downloads.get(*id).map(|r| r.value().clone());
                             match url_opt {
                                 Some(url) => {
                                     let _ = query.answer().send().await;
@@ -88,19 +89,24 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                                                 let id_clone = id.to_string();
 
                                                 let sender_name = match query.sender() {
-                                                    Some(grammers_client::peer::Peer::User(user)) => {
-                                                        match user.username() {
-                                                            Some(username) => Some(format!("@{}", username)),
-                                                            None => {
-                                                                let first_name = user.first_name().unwrap_or("User");
-                                                                let escaped_first = html_escape(first_name);
-                                                                let user_id = user.id().bare_id_unchecked();
-                                                                Some(format!(
-                                                                    "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
-                                                                ))
-                                                            }
+                                                    Some(grammers_client::peer::Peer::User(
+                                                        user,
+                                                    )) => match user.username() {
+                                                        Some(username) => {
+                                                            Some(format!("@{}", username))
                                                         }
-                                                    }
+                                                        None => {
+                                                            let first_name =
+                                                                user.first_name().unwrap_or("User");
+                                                            let escaped_first =
+                                                                html_escape(first_name);
+                                                            let user_id =
+                                                                user.id().bare_id_unchecked();
+                                                            Some(format!(
+                                                                "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
+                                                            ))
+                                                        }
+                                                    },
                                                     _ => None,
                                                 };
 
@@ -116,7 +122,9 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                                                     )
                                                     .await
                                                     {
-                                                        tracing::error!("Failed download callback: {e:#}");
+                                                        tracing::error!(
+                                                            "Failed download callback: {e:#}"
+                                                        );
                                                     }
                                                 });
                                             }
@@ -138,7 +146,9 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                 _ if data == "cmd:start" || data == "cmd:help" || data == "cmd:about" => {
                     let _ = query.answer().send().await;
                     if let Ok(Some(chat_ref)) = query.peer_ref().await {
-                        if let grammers_client::tl::enums::Update::BotCallbackQuery(update) = &query.raw {
+                        if let grammers_client::tl::enums::Update::BotCallbackQuery(update) =
+                            &query.raw
+                        {
                             let reply = match data.as_str() {
                                 "cmd:start" => commands::start::cmd_start_msg(),
                                 "cmd:help" => commands::help::cmd_help(),
@@ -165,7 +175,9 @@ async fn handle_message(
     state: &Arc<AppState>,
     msg: grammers_client::update::Message,
 ) -> anyhow::Result<()> {
-    let text = msg.text().to_string();
+    // Borrow the text — `url`/`args` below make their own owned copies only when needed,
+    // so the whole message body no longer gets cloned on every update.
+    let text = msg.text();
     let sender_id = msg
         .sender()
         .and_then(|p| match p {
@@ -173,26 +185,6 @@ async fn handle_message(
             _ => None,
         })
         .unwrap_or(0i64);
-
-    let sender_name = if let Some(sender) = msg.sender() {
-        match sender {
-            grammers_client::peer::Peer::User(user) => {
-                if let Some(username) = user.username() {
-                    Some(format!("@{}", username))
-                } else {
-                    let first_name = user.first_name().unwrap_or("User");
-                    let escaped_first = html_escape(first_name);
-                    let user_id = user.id().bare_id_unchecked();
-                    Some(format!(
-                        "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
-                    ))
-                }
-            }
-            _ => None,
-        }
-    } else {
-        None
-    };
 
     if !text.starts_with('/') {
         let whitelisted_url = text.split_whitespace().find(|word| {
@@ -320,7 +312,16 @@ async fn handle_message(
     }
 
     let whitelist = [
-        "/dl", "/l", "/mp", "/audio", "/start", "/stats", "/check", "/speedtest", "/help", "/about",
+        "/dl",
+        "/l",
+        "/mp",
+        "/audio",
+        "/start",
+        "/stats",
+        "/check",
+        "/speedtest",
+        "/help",
+        "/about",
     ];
     if !is_for_me || !whitelist.contains(&cmd) {
         return Ok(());
@@ -344,8 +345,15 @@ async fn handle_message(
         "/dl" | "/l" => {
             if !args.is_empty() {
                 tracing::info!(sender = sender_id, url = args, "download requested");
-                commands::dl::handle_dl(&state.client, chat, args, None, state, sender_name)
-                    .await?;
+                commands::dl::handle_dl(
+                    &state.client,
+                    chat,
+                    args,
+                    None,
+                    state,
+                    sender_display(&msg),
+                )
+                .await?;
             } else {
                 let text = "⚠️ <b>Usage:</b> <code>/dl &lt;url&gt;</code> or <code>/l &lt;url&gt;</code>\n\
                             Example: <code>/dl https://tiktok.com/...</code>";
@@ -364,7 +372,7 @@ async fn handle_message(
                     args,
                     Some("audio"),
                     state,
-                    sender_name,
+                    sender_display(&msg),
                 )
                 .await?;
             } else {
@@ -415,9 +423,12 @@ async fn handle_message(
                     .client
                     .send_message(chat, "Running speedtest (this may take up to 6 seconds)...")
                     .await?;
-                match commands::speedtest::cmd_speedtest().await {
+                match commands::speedtest::cmd_speedtest(state).await {
                     Ok(reply) => {
-                        let _ = state.client.edit_message(chat, status_msg.id(), reply).await;
+                        let _ = state
+                            .client
+                            .edit_message(chat, status_msg.id(), reply)
+                            .await;
                     }
                     Err(e) => {
                         let _ = state
@@ -437,6 +448,26 @@ async fn handle_message(
     }
 
     Ok(())
+}
+
+/// Build the sender mention only when a handler actually needs it (the download
+/// branches), instead of allocating a `format!` string for every incoming message.
+fn sender_display(msg: &grammers_client::update::Message) -> Option<String> {
+    match msg.sender()? {
+        grammers_client::peer::Peer::User(user) => {
+            if let Some(username) = user.username() {
+                Some(format!("@{}", username))
+            } else {
+                let first_name = user.first_name().unwrap_or("User");
+                let escaped_first = html_escape(first_name);
+                let user_id = user.id().bare_id_unchecked();
+                Some(format!(
+                    "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
+                ))
+            }
+        }
+        _ => None,
+    }
 }
 
 fn html_escape(s: &str) -> String {
