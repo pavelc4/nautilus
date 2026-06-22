@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 pub struct BotStats {
     boot_time: Instant,
     bot_username: String,
-    bot_id: i64,
     processed_total: AtomicU64,
     processed_ok: AtomicU64,
     processed_fail: AtomicU64,
@@ -14,11 +13,10 @@ pub struct BotStats {
 }
 
 impl BotStats {
-    pub fn new(bot_username: String, bot_id: i64) -> Self {
+    pub fn new(bot_username: String) -> Self {
         Self {
             boot_time: Instant::now(),
             bot_username,
-            bot_id,
             processed_total: AtomicU64::new(0),
             processed_ok: AtomicU64::new(0),
             processed_fail: AtomicU64::new(0),
@@ -59,9 +57,6 @@ impl BotStats {
 
     pub fn bot_username(&self) -> &str {
         &self.bot_username
-    }
-    pub fn bot_id(&self) -> i64 {
-        self.bot_id
     }
     pub fn processed_total(&self) -> u64 {
         self.processed_total.load(Ordering::Relaxed)

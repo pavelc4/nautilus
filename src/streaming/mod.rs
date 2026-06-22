@@ -133,7 +133,7 @@ pub fn build_media_message(caption: &str, meta: &MediaMeta, uploaded: Uploaded) 
     msg = msg.mime_type(&meta.mime_type);
 
     match meta.kind {
-        MediaKind::Video | MediaKind::File => {
+        MediaKind::Video => {
             msg = msg.document(uploaded);
         }
         MediaKind::Photo => {
@@ -168,7 +168,7 @@ pub fn build_media_input(caption: &str, meta: &MediaMeta, uploaded: Uploaded) ->
         MediaKind::Photo => {
             media = media.photo(uploaded);
         }
-        MediaKind::Video | MediaKind::Audio | MediaKind::File => {
+        MediaKind::Video | MediaKind::Audio => {
             media = media.document(uploaded);
         }
     }

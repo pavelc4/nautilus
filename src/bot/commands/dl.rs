@@ -114,7 +114,6 @@ pub async fn handle_dl(
                 MediaKind::Video => "Video",
                 MediaKind::Photo => "Photo",
                 MediaKind::Audio => "Audio",
-                MediaKind::File => "File",
             };
 
             let total_size: u64 = cached
@@ -229,7 +228,6 @@ pub async fn handle_dl(
         MediaKind::Video => "Video",
         MediaKind::Photo => "Photo",
         MediaKind::Audio => "Audio",
-        MediaKind::File => "File",
     };
 
     let total_size: u64 = items.iter().map(|item| item.meta.size).sum();
@@ -423,7 +421,12 @@ pub async fn handle_dl(
 fn detect_platform(url: &str) -> Option<&'static str> {
     let lower = url.to_lowercase();
     match () {
-        _ if lower.contains("facebook.com") || lower.contains("fb.watch") || lower.contains("fb.com") => Some("Facebook"),
+        _ if lower.contains("facebook.com")
+            || lower.contains("fb.watch")
+            || lower.contains("fb.com") =>
+        {
+            Some("Facebook")
+        }
         _ if lower.contains("instagram.com") || lower.contains("instagr.am") => Some("Instagram"),
         _ if lower.contains("tiktok.com") => Some("TikTok"),
         _ if lower.contains("twitter.com") || lower.contains("x.com") => Some("Twitter"),

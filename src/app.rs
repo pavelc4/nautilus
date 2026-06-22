@@ -62,7 +62,7 @@ impl AppState {
             client: session.client,
             config,
             registry,
-            bot_stats: BotStats::new(session.bot_username, session.bot_id),
+            bot_stats: BotStats::new(session.bot_username),
             pending_downloads: Arc::new(dashmap::DashMap::new()),
             media_cache: Arc::new(dashmap::DashMap::new()),
             http,

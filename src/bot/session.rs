@@ -9,10 +9,8 @@ use crate::config::Config;
 
 pub struct BotSession {
     pub client: Client,
-    pub pool_runner: tokio::task::JoinHandle<()>,
     pub updates_rx: UnboundedReceiver<grammers_session::updates::UpdatesLike>,
     pub bot_username: String,
-    pub bot_id: i64,
 }
 
 pub async fn build_client(config: &Config) -> anyhow::Result<BotSession> {
@@ -30,7 +28,9 @@ pub async fn build_client(config: &Config) -> anyhow::Result<BotSession> {
         handle,
     } = SenderPool::new(session, config.telegram_app_id);
     let client = Client::new(handle);
-    let pool_runner = tokio::spawn(runner.run());
+    // Detached: the sender-pool runner must live for the whole process; the runtime
+    // outlives it, so we don't need to hold the JoinHandle.
+    tokio::spawn(runner.run());
 
     if !client.is_authorized().await? {
         tracing::info!("signing in as bot...");
@@ -40,30 +40,27 @@ pub async fn build_client(config: &Config) -> anyhow::Result<BotSession> {
         tracing::info!("signed in successfully");
     }
 
-    let (bot_username, bot_id) = match client.get_me().await {
+    let bot_username = match client.get_me().await {
         Ok(user) => {
-            let id = user.id().bare_id_unchecked();
             let name = user.username().unwrap_or("(unknown)").to_string();
             tracing::info!(
-                user_id = id,
+                user_id = user.id().bare_id_unchecked(),
                 username = name,
                 first_name = user.first_name().unwrap_or("(none)"),
                 "bot logged in"
             );
-            (name, id)
+            name
         }
         Err(e) => {
             tracing::warn!("could not fetch bot info: {e}");
-            ("(unknown)".to_string(), 0)
+            "(unknown)".to_string()
         }
     };
 
     Ok(BotSession {
         client,
-        pool_runner,
         updates_rx: updates,
         bot_username,
-        bot_id,
     })
 }
 

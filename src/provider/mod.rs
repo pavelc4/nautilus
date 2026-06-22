@@ -14,7 +14,6 @@ pub enum MediaKind {
     Video,
     Photo,
     Audio,
-    File,
 }
 
 #[derive(Debug, Clone)]

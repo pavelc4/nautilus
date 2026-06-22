@@ -24,10 +24,6 @@ impl<R> ProgressReader<R> {
             counter,
         )
     }
-
-    pub fn bytes_read(&self) -> u64 {
-        self.counter.load(Ordering::Relaxed)
-    }
 }
 
 impl<R: AsyncRead> AsyncRead for ProgressReader<R> {
