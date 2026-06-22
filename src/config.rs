@@ -8,9 +8,6 @@ pub struct Config {
     pub owner_id: i64,
     pub astra_api_url: Option<String>,
 
-    pub ytdlp_cookies: Option<String>,
-    pub instagram_cookies: Option<String>,
-
     pub max_file_size_mb: Option<u64>,
     pub progress_edit_secs: Option<u64>,
 }
