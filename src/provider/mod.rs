@@ -1,6 +1,7 @@
 pub mod astra;
 pub mod registry;
 
+use std::borrow::Cow;
 use std::pin::Pin;
 
 use async_trait::async_trait;
@@ -19,7 +20,10 @@ pub enum MediaKind {
 #[derive(Debug, Clone)]
 pub struct MediaMeta {
     pub filename: String,
-    pub mime_type: String,
+    // Static literals in practice ("video/mp4", "image/jpeg", ...); Cow avoids a
+    // per-item heap allocation and makes MediaMeta::clone cheaper, while still
+    // allowing an owned value if a dynamic MIME ever appears.
+    pub mime_type: Cow<'static, str>,
     pub size: u64,
     pub duration_secs: Option<u32>,
     pub dims: Option<(i32, i32)>,

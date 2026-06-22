@@ -47,7 +47,7 @@ pub async fn download_item(
     client: &reqwest::Client,
     url: String,
     kind: MediaKind,
-    mime_type: String,
+    mime_type: std::borrow::Cow<'static, str>,
     filename: String,
     title: Option<String>,
     description: Option<String>,
