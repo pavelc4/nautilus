@@ -71,72 +71,105 @@ impl TryFrom<&url::Url> for AstraEndpoint {
     fn try_from(url: &url::Url) -> Result<Self, Self::Error> {
         let host = url
             .host_str()
-            .ok_or_else(|| anyhow::anyhow!("no host in URL"))?
-            .to_lowercase();
-        let path = url.path().to_lowercase();
+            .ok_or_else(|| anyhow::anyhow!("no host in URL"))?;
+        let path = url.path();
 
-        match host.as_str() {
-            h if h.contains("youtube.com")
-                || h.contains("youtu.be")
-                || h.contains("yewtu.be")
-                || h.contains("inv.nadeko.net") =>
+        // Case-insensitive matching without allocating (needles are ASCII-lowercase):
+        // `contains_ci` / `ends_with_ci` replace the old `host.to_lowercase()` allocations.
+        match host {
+            h if contains_ci(h, "youtube.com")
+                || contains_ci(h, "youtu.be")
+                || contains_ci(h, "yewtu.be")
+                || contains_ci(h, "inv.nadeko.net") =>
             {
                 Ok(Self::YoutubeDownload)
             }
-            h if h.contains("tiktok.com") && path.contains("/music/") => Ok(Self::TiktokMusic),
-            h if h.contains("tiktok.com")
-                && path.contains("/@")
-                && !path.contains("/video/")
-                && !path.contains("/photo/") =>
+            h if contains_ci(h, "tiktok.com") && contains_ci(path, "/music/") => {
+                Ok(Self::TiktokMusic)
+            }
+            h if contains_ci(h, "tiktok.com")
+                && contains_ci(path, "/@")
+                && !contains_ci(path, "/video/")
+                && !contains_ci(path, "/photo/") =>
             {
                 Ok(Self::TiktokProfile)
             }
-            h if h.contains("tiktok.com") => Ok(Self::TiktokDownload),
-            h if h == "twitter.com"
-                || h.ends_with(".twitter.com")
-                || h == "x.com"
-                || h.ends_with(".x.com")
-                || h == "t.co"
-                || h.ends_with(".t.co") =>
+            h if contains_ci(h, "tiktok.com") => Ok(Self::TiktokDownload),
+            h if h.eq_ignore_ascii_case("twitter.com")
+                || ends_with_ci(h, ".twitter.com")
+                || h.eq_ignore_ascii_case("x.com")
+                || ends_with_ci(h, ".x.com")
+                || h.eq_ignore_ascii_case("t.co")
+                || ends_with_ci(h, ".t.co") =>
             {
                 Ok(Self::TwitterDownload)
             }
-            h if (h.contains("instagram.com") || h.contains("instagr.am"))
-                && (path.contains("/stories/") || path.contains("/story/")) =>
+            h if (contains_ci(h, "instagram.com") || contains_ci(h, "instagr.am"))
+                && (contains_ci(path, "/stories/") || contains_ci(path, "/story/")) =>
             {
                 Ok(Self::InstagramStories)
             }
-            h if (h.contains("instagram.com") || h.contains("instagr.am"))
+            h if (contains_ci(h, "instagram.com") || contains_ci(h, "instagr.am"))
                 && instagram_is_profile_path(url) =>
             {
                 Ok(Self::InstagramProfile)
             }
-            h if h.contains("instagram.com") || h.contains("instagr.am") => {
+            h if contains_ci(h, "instagram.com") || contains_ci(h, "instagr.am") => {
                 Ok(Self::InstagramDownload)
             }
-            h if h.contains("facebook.com") || h.contains("fb.watch") || h.contains("fb.com") => {
+            h if contains_ci(h, "facebook.com")
+                || contains_ci(h, "fb.watch")
+                || contains_ci(h, "fb.com") =>
+            {
                 Ok(Self::FacebookDownload)
             }
-            h if h.contains("threads.net") => Ok(Self::ThreadsDownload),
-            h if h.contains("reddit.com") || h.contains("redd.it") => Ok(Self::RedditDownload),
-            h if h.contains("pinterest.com") || h.contains("pin.it") => Ok(Self::PinterestDownload),
-            h if h.contains("terabox.com")
-                || h.contains("nephobox.com")
-                || h.contains("dubox.com")
-                || h.contains("teraboxapp.com")
-                || h.contains("1024terabox.com")
-                || h.contains("terabox.app")
-                || h.contains("terabox.link") =>
+            h if contains_ci(h, "threads.net") => Ok(Self::ThreadsDownload),
+            h if contains_ci(h, "reddit.com") || contains_ci(h, "redd.it") => {
+                Ok(Self::RedditDownload)
+            }
+            h if contains_ci(h, "pinterest.com") || contains_ci(h, "pin.it") => {
+                Ok(Self::PinterestDownload)
+            }
+            h if contains_ci(h, "terabox.com")
+                || contains_ci(h, "nephobox.com")
+                || contains_ci(h, "dubox.com")
+                || contains_ci(h, "teraboxapp.com")
+                || contains_ci(h, "1024terabox.com")
+                || contains_ci(h, "terabox.app")
+                || contains_ci(h, "terabox.link") =>
             {
                 Ok(Self::TeraboxDownload)
             }
-            h if h.contains("spotify.com") => Ok(Self::SpotifyDownload),
-            h if h.contains("soundcloud.com") => Ok(Self::SoundcloudDownload),
-            h if h.contains("capcut.com") => Ok(Self::CapcutDownload),
-            h if h.contains("linkedin.com") => Ok(Self::LinkedinDownload),
+            h if contains_ci(h, "spotify.com") => Ok(Self::SpotifyDownload),
+            h if contains_ci(h, "soundcloud.com") => Ok(Self::SoundcloudDownload),
+            h if contains_ci(h, "capcut.com") => Ok(Self::CapcutDownload),
+            h if contains_ci(h, "linkedin.com") => Ok(Self::LinkedinDownload),
             _ => anyhow::bail!("unsupported domain: {host}"),
         }
     }
+}
+
+/// ASCII case-insensitive substring check, allocation-free. `needle` must be lowercase.
+fn contains_ci(haystack: &str, needle: &str) -> bool {
+    let (hb, nb) = (haystack.as_bytes(), needle.as_bytes());
+    if nb.is_empty() {
+        return true;
+    }
+    if nb.len() > hb.len() {
+        return false;
+    }
+    hb.windows(nb.len())
+        .any(|w| w.iter().zip(nb).all(|(c, n)| c.eq_ignore_ascii_case(n)))
+}
+
+/// ASCII case-insensitive suffix check, allocation-free. `suffix` must be lowercase.
+fn ends_with_ci(haystack: &str, suffix: &str) -> bool {
+    let (hb, sb) = (haystack.as_bytes(), suffix.as_bytes());
+    hb.len() >= sb.len()
+        && hb[hb.len() - sb.len()..]
+            .iter()
+            .zip(sb)
+            .all(|(c, n)| c.eq_ignore_ascii_case(n))
 }
 
 fn instagram_is_profile_path(url: &url::Url) -> bool {
