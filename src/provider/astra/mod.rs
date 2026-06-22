@@ -318,16 +318,16 @@ impl Provider for AstraProvider {
                 .any(|d| d.media_type == AstraMediaType::Audio);
         }
 
-        if let Some(ref photos) = data.photos {
-            if !photos.is_empty() {
-                has_photo = true;
-            }
+        if let Some(ref photos) = data.photos
+            && !photos.is_empty()
+        {
+            has_photo = true;
         }
 
-        if let Some(ref videos) = data.videos {
-            if !videos.is_empty() {
-                has_video = true;
-            }
+        if let Some(ref videos) = data.videos
+            && !videos.is_empty()
+        {
+            has_video = true;
         }
 
         Ok(crate::provider::MediaMetadataInfo {

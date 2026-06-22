@@ -156,10 +156,8 @@ async fn sample_cpu_stats(delay: Duration) -> (f64, f64) {
 }
 
 fn format_memory(mb: f64) -> String {
-    if mb < 1.0 {
-        format!("{:.2} MB", mb)
-    } else if mb < 1024.0 {
-        format!("{:.2} MB", mb)
+    if mb < 1024.0 {
+        format!("{mb:.2} MB")
     } else {
         format!("{:.2} GB", mb / 1024.0)
     }
@@ -374,7 +372,7 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
          └ <b>Load:</b> {load1} {load5} {load15}\n\n\
          <b>Bot:</b>\n\
          ├ <b>Username:</b> @{}\n\
-         ├ <b>Memory:</b> {} MB (RSS: {:.2} KB)\n\
+         ├ <b>Memory:</b> {:.2} MB (RSS: {:.2} KB)\n\
          ├ <b>CPU:</b> {bot_cpu:.1}%\n\
          └ <b>Uptime:</b> {}\n\n\
          <b>Astra Backend:</b>\n\
@@ -388,7 +386,7 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
         format_memory(mem_total_mb),
         swap_str,
         stats.bot_username(),
-        format!("{:.2}", bot_mem_mb),
+        bot_mem_mb,
         vm_rss_kb as f64,
         uptime_str,
         astra_status,
@@ -406,7 +404,7 @@ async fn read_proc(path: &str) -> anyhow::Result<String> {
 fn parse_proc_val(content: &str, key: &str) -> Option<u64> {
     for line in content.lines() {
         if let Some(val) = line.strip_prefix(key) {
-            let num_str = val.trim().split_whitespace().next()?;
+            let num_str = val.split_whitespace().next()?;
             return num_str.parse().ok();
         }
     }

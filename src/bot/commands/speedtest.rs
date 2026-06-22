@@ -29,17 +29,17 @@ pub async fn cmd_speedtest(state: &Arc<AppState>) -> anyhow::Result<InputMessage
     let mut bytes_downloaded = 0;
     let mut down_duration = Duration::from_secs(1);
 
-    if let Ok(mut resp) = down_resp {
-        if resp.status().is_success() {
-            let stream_start = Instant::now();
-            while let Ok(Some(chunk)) = resp.chunk().await {
-                bytes_downloaded += chunk.len();
-                if stream_start.elapsed() >= Duration::from_secs(3) {
-                    break;
-                }
+    if let Ok(mut resp) = down_resp
+        && resp.status().is_success()
+    {
+        let stream_start = Instant::now();
+        while let Ok(Some(chunk)) = resp.chunk().await {
+            bytes_downloaded += chunk.len();
+            if stream_start.elapsed() >= Duration::from_secs(3) {
+                break;
             }
-            down_duration = stream_start.elapsed();
         }
+        down_duration = stream_start.elapsed();
     }
 
     let down_speed_mbps = if bytes_downloaded > 0 && down_duration.as_secs_f64() > 0.0 {

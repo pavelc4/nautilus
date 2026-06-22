@@ -185,6 +185,10 @@ pub async fn handle_dl(
         return Err(anyhow::anyhow!("no media found"));
     }
 
+    // Index loop, not `&items`: MediaItem holds a `dyn AsyncRead + Send` reader that is
+    // not Sync, so `slice::Iter<MediaItem>` is not Send and cannot be held across the
+    // .await below inside the spawned (Send) handler task. A `Range<usize>` is Send.
+    #[allow(clippy::needless_range_loop)]
     for i in 0..items.len() {
         if items[i].meta.size > state.config.max_file_size_bytes() {
             state.bot_stats.record_failure();
@@ -297,10 +301,10 @@ pub async fn handle_dl(
     if total == 1 {
         let (uploaded, meta) = uploads.into_iter().next().unwrap();
         let media_msg = streaming::build_media_message(&caption, &meta, uploaded);
-        if let Ok(msg) = client.send_message(chat, media_msg).await {
-            if let Some(m) = msg.media() {
-                sent_medias.push(m);
-            }
+        if let Ok(msg) = client.send_message(chat, media_msg).await
+            && let Some(m) = msg.media()
+        {
+            sent_medias.push(m);
         }
     } else {
         let mut photo_uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
@@ -357,10 +361,10 @@ pub async fn handle_dl(
                 Ok(msgs) => {
                     album_sent = true;
                     for msg_opt in msgs {
-                        if let Some(msg) = msg_opt {
-                            if let Some(m) = msg.media() {
-                                sent_medias.push(m);
-                            }
+                        if let Some(msg) = msg_opt
+                            && let Some(m) = msg.media()
+                        {
+                            sent_medias.push(m);
                         }
                     }
                 }
@@ -373,10 +377,10 @@ pub async fn handle_dl(
                 for (i, (uploaded, meta)) in batch.into_iter().enumerate() {
                     let c = if is_last && i == 0 { &caption } else { "" };
                     let media_msg = streaming::build_media_message(c, &meta, uploaded);
-                    if let Ok(msg) = client.send_message(chat, media_msg).await {
-                        if let Some(m) = msg.media() {
-                            sent_medias.push(m);
-                        }
+                    if let Ok(msg) = client.send_message(chat, media_msg).await
+                        && let Some(m) = msg.media()
+                    {
+                        sent_medias.push(m);
                     }
                 }
             }
@@ -393,10 +397,10 @@ pub async fn handle_dl(
                 .await;
             let c = if is_last { &caption } else { "" };
             let media_msg = streaming::build_media_message(c, &meta, uploaded);
-            if let Ok(msg) = client.send_message(chat, media_msg).await {
-                if let Some(m) = msg.media() {
-                    sent_medias.push(m);
-                }
+            if let Ok(msg) = client.send_message(chat, media_msg).await
+                && let Some(m) = msg.media()
+            {
+                sent_medias.push(m);
             }
         }
     }
