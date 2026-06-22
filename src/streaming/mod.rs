@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -34,6 +35,10 @@ pub async fn upload_media(
         Some(tokio::spawn(async move {
             let mut last_edited = tokio::time::Instant::now();
             let start_time = tokio::time::Instant::now();
+            // Buffers reused across ticks — cleared and rewritten in place each edit
+            // instead of allocating ~6 fresh Strings per tick (format! + .repeat()).
+            let mut bar = String::with_capacity(10);
+            let mut text = String::with_capacity(160);
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 let read = byte_counter.load(Ordering::Relaxed);
@@ -50,7 +55,13 @@ pub async fn upload_media(
                 if last_edited.elapsed() >= edit_interval {
                     let pct = read as f64 / total as f64 * 100.0;
                     let filled = ((pct / 10.0).floor() as usize).clamp(0, 10);
-                    let bar = format!("{}{}", "#".repeat(filled), "-".repeat(10 - filled));
+                    bar.clear();
+                    for _ in 0..filled {
+                        bar.push('#');
+                    }
+                    for _ in 0..(10 - filled) {
+                        bar.push('-');
+                    }
 
                     let elapsed = start_time.elapsed().as_secs_f64();
                     let speed = if elapsed > 0.0 {
@@ -59,43 +70,44 @@ pub async fn upload_media(
                         0.0
                     };
 
-                    let speed_str = if speed > 1024.0 * 1024.0 {
-                        format!("{:.2} MB/s", speed / (1024.0 * 1024.0))
-                    } else if speed > 1024.0 {
-                        format!("{:.1} KB/s", speed / 1024.0)
-                    } else {
-                        format!("{:.0} B/s", speed)
-                    };
-
-                    let eta = if speed > 0.0 {
-                        let remaining_bytes = total.saturating_sub(read) as f64;
-                        let eta_secs = (remaining_bytes / speed).round() as u64;
-                        if eta_secs > 3600 {
-                            format!("{:02}:{:02}:{:02}", eta_secs / 3600, (eta_secs % 3600) / 60, eta_secs % 60)
-                        } else {
-                            format!("{:02}:{:02}", eta_secs / 60, eta_secs % 60)
-                        }
-                    } else {
-                        "--:--".to_string()
-                    };
-
                     let read_mb = read as f64 / (1024.0 * 1024.0);
                     let total_mb = total as f64 / (1024.0 * 1024.0);
 
-                    let progress_text = format!(
-                        "⚡️ <b>Uploading:</b> [<code>{}</code>] {:.1}%\n\
-                         ├ <b>Progress:</b> {:.2} MB / {:.2} MB\n\
-                         ├ <b>Speed:</b> {}\n\
-                         └ <b>ETA:</b> {}",
-                        bar, pct, read_mb, total_mb, speed_str, eta
+                    text.clear();
+                    let _ = write!(
+                        text,
+                        "⚡️ <b>Uploading:</b> [<code>{bar}</code>] {pct:.1}%\n\
+                         ├ <b>Progress:</b> {read_mb:.2} MB / {total_mb:.2} MB\n\
+                         ├ <b>Speed:</b> "
                     );
+                    if speed > 1024.0 * 1024.0 {
+                        let _ = write!(text, "{:.2} MB/s", speed / (1024.0 * 1024.0));
+                    } else if speed > 1024.0 {
+                        let _ = write!(text, "{:.1} KB/s", speed / 1024.0);
+                    } else {
+                        let _ = write!(text, "{:.0} B/s", speed);
+                    }
+                    text.push_str("\n└ <b>ETA:</b> ");
+                    if speed > 0.0 {
+                        let remaining_bytes = total.saturating_sub(read) as f64;
+                        let eta_secs = (remaining_bytes / speed).round() as u64;
+                        if eta_secs > 3600 {
+                            let _ = write!(
+                                text,
+                                "{:02}:{:02}:{:02}",
+                                eta_secs / 3600,
+                                (eta_secs % 3600) / 60,
+                                eta_secs % 60
+                            );
+                        } else {
+                            let _ = write!(text, "{:02}:{:02}", eta_secs / 60, eta_secs % 60);
+                        }
+                    } else {
+                        text.push_str("--:--");
+                    }
 
                     let _ = client
-                        .edit_message(
-                            chat,
-                            status_msg_id,
-                            InputMessage::new().html(progress_text),
-                        )
+                        .edit_message(chat, status_msg_id, InputMessage::new().html(&text))
                         .await;
                     last_edited = tokio::time::Instant::now();
                 }
