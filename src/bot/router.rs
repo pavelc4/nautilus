@@ -65,19 +65,15 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                             Some(url) => {
                                 let _ = query.answer().send().await;
 
-                                // Not a let-chain: that would hold the `&query.raw` borrow
-                                // across the .await below and make the future non-Send.
-                                #[allow(clippy::collapsible_if)]
-                                if let Ok(Some(chat_ref)) = query.peer_ref().await {
-                                    if let grammers_client::tl::enums::Update::BotCallbackQuery(
+                                if let Ok(Some(chat_ref)) = query.peer_ref().await
+                                    && let grammers_client::tl::enums::Update::BotCallbackQuery(
                                         update,
                                     ) = &query.raw
-                                    {
-                                        let _ = state
-                                            .client
-                                            .delete_messages(chat_ref, &[update.msg_id])
-                                            .await;
-                                    }
+                                {
+                                    let _ = state
+                                        .client
+                                        .delete_messages(chat_ref, &[update.msg_id])
+                                        .await;
                                 }
 
                                 match *format {
@@ -147,23 +143,21 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                     let _ = query.answer().send().await;
                     // Not a let-chain: keeps the `&query.raw` borrow out of the .await below
                     // so the spawned handler future stays Send.
-                    #[allow(clippy::collapsible_if)]
-                    if let Ok(Some(chat_ref)) = query.peer_ref().await {
-                        if let grammers_client::tl::enums::Update::BotCallbackQuery(update) =
+                    if let Ok(Some(chat_ref)) = query.peer_ref().await
+                        && let grammers_client::tl::enums::Update::BotCallbackQuery(update) =
                             &query.raw
-                        {
-                            let reply = match data.as_str() {
-                                "cmd:start" => commands::start::cmd_start_msg(),
-                                "cmd:help" => commands::help::cmd_help(),
-                                "cmd:about" => commands::about::cmd_about(),
-                                _ => unreachable!(),
-                            };
+                    {
+                        let reply = match data.as_str() {
+                            "cmd:start" => commands::start::cmd_start_msg(),
+                            "cmd:help" => commands::help::cmd_help(),
+                            "cmd:about" => commands::about::cmd_about(),
+                            _ => unreachable!(),
+                        };
 
-                            let _ = state
-                                .client
-                                .edit_message(chat_ref, update.msg_id, reply)
-                                .await;
-                        }
+                        let _ = state
+                            .client
+                            .edit_message(chat_ref, update.msg_id, reply)
+                            .await;
                     }
                 }
                 _ => {}
