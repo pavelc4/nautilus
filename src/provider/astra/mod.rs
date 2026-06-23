@@ -74,7 +74,9 @@ impl Provider for AstraProvider {
 
         if let Some(ref downloads) = data.downloads {
             let has_video_or_photo = downloads.iter().any(|d| {
-                d.media_type == AstraMediaType::Video
+                (d.media_type == AstraMediaType::Video
+                    && !d.url.contains(".m3u8")
+                    && !d.url.contains("hls_playlist"))
                     || d.media_type == AstraMediaType::Image
                     || d.media_type == AstraMediaType::Slide
             });
@@ -83,7 +85,11 @@ impl Provider for AstraProvider {
             if wants_video {
                 let video_items: Vec<_> = downloads
                     .iter()
-                    .filter(|d| d.media_type == AstraMediaType::Video)
+                    .filter(|d| {
+                        d.media_type == AstraMediaType::Video
+                            && !d.url.contains(".m3u8")
+                            && !d.url.contains("hls_playlist")
+                    })
                     .collect();
                 if !video_items.is_empty() {
                     let selected_video = match platform {
@@ -183,7 +189,11 @@ impl Provider for AstraProvider {
             if wants_audio {
                 let audio_items: Vec<_> = downloads
                     .iter()
-                    .filter(|d| d.media_type == AstraMediaType::Audio)
+                    .filter(|d| {
+                        d.media_type == AstraMediaType::Audio
+                            && d.quality.as_deref() != Some("storyboard")
+                            && !d.label.as_deref().unwrap_or("").to_lowercase().contains("mhtml")
+                    })
                     .collect();
                 if let Some(a) = audio_items.first() {
                     let sanitized =
@@ -296,13 +306,21 @@ impl Provider for AstraProvider {
         if let Some(ref downloads) = data.downloads {
             has_video = downloads
                 .iter()
-                .any(|d| d.media_type == AstraMediaType::Video);
+                .any(|d| {
+                    d.media_type == AstraMediaType::Video
+                        && !d.url.contains(".m3u8")
+                        && !d.url.contains("hls_playlist")
+                });
             has_photo = downloads.iter().any(|d| {
                 d.media_type == AstraMediaType::Image || d.media_type == AstraMediaType::Slide
             });
             has_audio = downloads
                 .iter()
-                .any(|d| d.media_type == AstraMediaType::Audio);
+                .any(|d| {
+                    d.media_type == AstraMediaType::Audio
+                        && d.quality.as_deref() != Some("storyboard")
+                        && !d.label.as_deref().unwrap_or("").to_lowercase().contains("mhtml")
+                });
         }
 
         if let Some(ref photos) = data.photos
