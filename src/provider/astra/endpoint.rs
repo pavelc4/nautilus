@@ -123,7 +123,7 @@ impl TryFrom<&url::Url> for AstraEndpoint {
             {
                 Ok(Self::FacebookDownload)
             }
-            h if contains_ci(h, "threads.net") => Ok(Self::ThreadsDownload),
+            h if contains_ci(h, "threads.net") || contains_ci(h, "threads.com") => Ok(Self::ThreadsDownload),
             h if contains_ci(h, "reddit.com") || contains_ci(h, "redd.it") => {
                 Ok(Self::RedditDownload)
             }

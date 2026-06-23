@@ -106,12 +106,16 @@ impl Provider for AstraProvider {
                                 combined_videos
                                     .into_iter()
                                     .max_by_key(|v| {
-                                        parse_quality(v.quality.as_deref().unwrap_or(""))
+                                        let q = v.quality.as_deref().unwrap_or("");
+                                        let l = v.label.as_deref().unwrap_or("");
+                                        parse_quality(q, l)
                                     })
                                     .copied()
                             } else {
                                 video_items.into_iter().max_by_key(|v| {
-                                    parse_quality(v.quality.as_deref().unwrap_or(""))
+                                    let q = v.quality.as_deref().unwrap_or("");
+                                    let l = v.label.as_deref().unwrap_or("");
+                                    parse_quality(q, l)
                                 })
                             }
                         }
@@ -139,7 +143,11 @@ impl Provider for AstraProvider {
                         }
                         _ => video_items
                             .into_iter()
-                            .max_by_key(|v| parse_quality(v.quality.as_deref().unwrap_or(""))),
+                            .max_by_key(|v| {
+                                let q = v.quality.as_deref().unwrap_or("");
+                                let l = v.label.as_deref().unwrap_or("");
+                                parse_quality(q, l)
+                            }),
                     };
 
                     if let Some(v) = selected_video {

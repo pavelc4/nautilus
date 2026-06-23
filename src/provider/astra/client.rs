@@ -1,9 +1,30 @@
 use crate::provider::{MediaItem, MediaKind, MediaMeta, MediaReader};
 use tokio_stream::StreamExt;
 
-pub fn parse_quality(q: &str) -> u32 {
-    let clean: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
-    clean.parse().unwrap_or(0)
+pub fn parse_quality(quality: &str, label: &str) -> u32 {
+    let score = |s: &str| {
+        let clean: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+        if !clean.is_empty() {
+            if let Ok(num) = clean.parse::<u32>() {
+                return Some(num);
+            }
+        }
+        let lower = s.to_lowercase();
+        if lower.contains("hd") || lower.contains("high") || lower.contains("original") {
+            return Some(1080);
+        }
+        if lower.contains("medium") {
+            return Some(720);
+        }
+        if lower.contains("sd") || lower.contains("low") {
+            return Some(360);
+        }
+        None
+    };
+
+    score(quality)
+        .or_else(|| score(label))
+        .unwrap_or(0)
 }
 
 pub fn sanitize_filename(title: &str, default: &str) -> String {
