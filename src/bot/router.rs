@@ -529,11 +529,11 @@ async fn handle_message(
         }
         "/settingsid" => {
             if sender_id == state.config.owner_id {
-                let is_group = match msg.peer() {
+                let is_group = matches!(
+                    msg.peer(),
                     Some(grammers_client::peer::Peer::Group(_))
-                    | Some(grammers_client::peer::Peer::Channel(_)) => true,
-                    _ => false,
-                };
+                        | Some(grammers_client::peer::Peer::Channel(_))
+                );
 
                 if !is_group {
                     state
