@@ -69,8 +69,8 @@ impl TopicSettings {
     }
 }
 
-pub fn get_message_topic_id(msg: &grammers_client::update::Message) -> Option<i32> {
-    match &std::ops::Deref::deref(msg).raw {
+pub fn get_topic_id_from_raw(raw_msg: &grammers_client::tl::enums::Message) -> Option<i32> {
+    match raw_msg {
         grammers_client::tl::enums::Message::Message(raw_msg) => match &raw_msg.reply_to {
             Some(grammers_client::tl::enums::MessageReplyHeader::Header(header)) => {
                 if header.forum_topic {
@@ -83,4 +83,8 @@ pub fn get_message_topic_id(msg: &grammers_client::update::Message) -> Option<i3
         },
         _ => None,
     }
+}
+
+pub fn get_message_topic_id(msg: &grammers_client::update::Message) -> Option<i32> {
+    get_topic_id_from_raw(&std::ops::Deref::deref(msg).raw)
 }

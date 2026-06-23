@@ -11,21 +11,23 @@ pub fn cmd_start_msg() -> InputMessage {
                 • Send any supported media link directly to check/download.\n\n\
                 🤖 <i>Select an option below to navigate:</i>";
 
-    let buttons = vec![
-        vec![
-            Button::data("Help & Guide", "cmd:help"),
-            Button::data("About Project", "cmd:about"),
-        ],
-    ];
+    let buttons = vec![vec![
+        Button::data("Help & Guide", "cmd:help"),
+        Button::data("About Project", "cmd:about"),
+    ]];
 
-    InputMessage::new()
-        .html(text)
-        .reply_markup(grammers_client::message::ReplyMarkup::from_buttons(&buttons))
+    InputMessage::new().html(text).reply_markup(
+        grammers_client::message::ReplyMarkup::from_buttons(&buttons),
+    )
 }
 
-pub async fn cmd_start(client: &Client, chat: PeerRef) -> anyhow::Result<()> {
+pub async fn cmd_start(
+    client: &Client,
+    chat: PeerRef,
+    reply_to_msg_id: Option<i32>,
+) -> anyhow::Result<()> {
     client
-        .send_message(chat, cmd_start_msg())
+        .send_message(chat, cmd_start_msg().reply_to(reply_to_msg_id))
         .await?;
     Ok(())
 }

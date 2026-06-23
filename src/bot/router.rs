@@ -65,6 +65,17 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                             Some(url) => {
                                 let _ = query.answer().send().await;
 
+                                let reply_to_id =
+                                    if let Ok(buttons_msg) = query.load_message().await {
+                                        buttons_msg.reply_to_message_id().or_else(|| {
+                                            crate::bot::topic_settings::get_topic_id_from_raw(
+                                                &buttons_msg.raw,
+                                            )
+                                        })
+                                    } else {
+                                        None
+                                    };
+
                                 if let Ok(Some(chat_ref)) = query.peer_ref().await
                                     && let grammers_client::tl::enums::Update::BotCallbackQuery(
                                         update,
@@ -117,6 +128,7 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                                                     Some(&format_clone),
                                                     &state,
                                                     sender_name,
+                                                    reply_to_id,
                                                 )
                                                 .await
                                                 {
@@ -216,7 +228,12 @@ async fn handle_message(
             );
             let status_msg = state
                 .client
-                .send_message(chat, "Checking link media...")
+                .send_message(
+                    chat,
+                    InputMessage::new()
+                        .text("Checking link media...")
+                        .reply_to(Some(msg.id())),
+                )
                 .await?;
 
             match state.registry.fetch_metadata(url).await {
@@ -378,6 +395,7 @@ async fn handle_message(
                     None,
                     state,
                     sender_display(&msg),
+                    Some(msg.id()),
                 )
                 .await?;
             } else {
@@ -385,7 +403,10 @@ async fn handle_message(
                             Example: <code>/dl https://tiktok.com/...</code>";
                 state
                     .client
-                    .send_message(chat, InputMessage::new().html(text))
+                    .send_message(
+                        chat,
+                        InputMessage::new().html(text).reply_to(Some(msg.id())),
+                    )
                     .await?;
             }
         }
@@ -399,6 +420,7 @@ async fn handle_message(
                     Some("audio"),
                     state,
                     sender_display(&msg),
+                    Some(msg.id()),
                 )
                 .await?;
             } else {
@@ -406,40 +428,65 @@ async fn handle_message(
                             Example: <code>/mp https://youtube.com/...</code>";
                 state
                     .client
-                    .send_message(chat, InputMessage::new().html(text))
+                    .send_message(
+                        chat,
+                        InputMessage::new().html(text).reply_to(Some(msg.id())),
+                    )
                     .await?;
             }
         }
         "/stats" => {
             if sender_id == state.config.owner_id {
                 let reply = commands::stats::cmd_stats(state, &state.client).await?;
-                state.client.send_message(chat, reply).await?;
+                state
+                    .client
+                    .send_message(chat, reply.reply_to(Some(msg.id())))
+                    .await?;
             } else {
                 state
                     .client
-                    .send_message(chat, "Permission denied.")
+                    .send_message(
+                        chat,
+                        InputMessage::new()
+                            .text("Permission denied.")
+                            .reply_to(Some(msg.id())),
+                    )
                     .await?;
             }
         }
         "/start" => {
-            commands::start::cmd_start(&state.client, chat).await?;
+            commands::start::cmd_start(&state.client, chat, Some(msg.id())).await?;
         }
         "/help" => {
             let reply = commands::help::cmd_help();
-            state.client.send_message(chat, reply).await?;
+            state
+                .client
+                .send_message(chat, reply.reply_to(Some(msg.id())))
+                .await?;
         }
         "/about" => {
             let reply = commands::about::cmd_about();
-            state.client.send_message(chat, reply).await?;
+            state
+                .client
+                .send_message(chat, reply.reply_to(Some(msg.id())))
+                .await?;
         }
         "/check" => {
             if sender_id == state.config.owner_id {
                 let reply = commands::check::cmd_check(state).await?;
-                state.client.send_message(chat, reply).await?;
+                state
+                    .client
+                    .send_message(chat, reply.reply_to(Some(msg.id())))
+                    .await?;
             } else {
                 state
                     .client
-                    .send_message(chat, "Permission denied.")
+                    .send_message(
+                        chat,
+                        InputMessage::new()
+                            .text("Permission denied.")
+                            .reply_to(Some(msg.id())),
+                    )
                     .await?;
             }
         }
@@ -447,7 +494,12 @@ async fn handle_message(
             if sender_id == state.config.owner_id {
                 let status_msg = state
                     .client
-                    .send_message(chat, "Running speedtest (this may take up to 6 seconds)...")
+                    .send_message(
+                        chat,
+                        InputMessage::new()
+                            .text("Running speedtest (this may take up to 6 seconds)...")
+                            .reply_to(Some(msg.id())),
+                    )
                     .await?;
                 match commands::speedtest::cmd_speedtest(state).await {
                     Ok(reply) => {
@@ -466,7 +518,12 @@ async fn handle_message(
             } else {
                 state
                     .client
-                    .send_message(chat, "Permission denied.")
+                    .send_message(
+                        chat,
+                        InputMessage::new()
+                            .text("Permission denied.")
+                            .reply_to(Some(msg.id())),
+                    )
                     .await?;
             }
         }
@@ -481,7 +538,12 @@ async fn handle_message(
                 if !is_group {
                     state
                         .client
-                        .send_message(chat, "This command can only be used in groups.")
+                        .send_message(
+                            chat,
+                            InputMessage::new()
+                                .text("This command can only be used in groups.")
+                                .reply_to(Some(msg.id())),
+                        )
                         .await?;
                     return Ok(());
                 }
@@ -509,7 +571,10 @@ async fn handle_message(
                     );
                     state
                         .client
-                        .send_message(chat, InputMessage::new().html(response))
+                        .send_message(
+                            chat,
+                            InputMessage::new().html(response).reply_to(Some(msg.id())),
+                        )
                         .await?;
                 } else if args.eq_ignore_ascii_case("clear") {
                     state
@@ -518,7 +583,12 @@ async fn handle_message(
                         .await?;
                     state
                         .client
-                        .send_message(chat, "Cleared all whitelisted topic IDs for this group. Any topic is now allowed.")
+                        .send_message(
+                            chat,
+                            InputMessage::new()
+                                .text("Cleared all whitelisted topic IDs for this group. Any topic is now allowed.")
+                                .reply_to(Some(msg.id())),
+                        )
                         .await?;
                 } else {
                     let mut topic_ids = Vec::new();
@@ -536,7 +606,12 @@ async fn handle_message(
                     if has_error {
                         state
                             .client
-                            .send_message(chat, "Error: Topic IDs must be valid integers.")
+                            .send_message(
+                                chat,
+                                InputMessage::new()
+                                    .text("Error: Topic IDs must be valid integers.")
+                                    .reply_to(Some(msg.id())),
+                            )
                             .await?;
                     } else {
                         state
@@ -554,14 +629,22 @@ async fn handle_message(
                         );
                         state
                             .client
-                            .send_message(chat, InputMessage::new().html(msg_text))
+                            .send_message(
+                                chat,
+                                InputMessage::new().html(msg_text).reply_to(Some(msg.id())),
+                            )
                             .await?;
                     }
                 }
             } else {
                 state
                     .client
-                    .send_message(chat, "Permission denied.")
+                    .send_message(
+                        chat,
+                        InputMessage::new()
+                            .text("Permission denied.")
+                            .reply_to(Some(msg.id())),
+                    )
                     .await?;
             }
         }

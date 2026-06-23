@@ -69,6 +69,7 @@ pub async fn handle_dl(
     format: Option<&str>,
     state: &Arc<AppState>,
     sender_name: Option<String>,
+    reply_to_msg_id: Option<i32>,
 ) -> anyhow::Result<()> {
     let _guard = JobGuard::new(state.clone());
     let url = normalize_url(url);
@@ -78,7 +79,12 @@ pub async fn handle_dl(
     };
 
     let status_msg = client
-        .send_message(chat, InputMessage::new().text("Resolving URL..."))
+        .send_message(
+            chat,
+            InputMessage::new()
+                .text("Resolving URL...")
+                .reply_to(reply_to_msg_id),
+        )
         .await?;
     let status_id = status_msg.id();
 
@@ -149,7 +155,10 @@ pub async fn handle_dl(
             if cached.medias.len() == 1 {
                 let media = &cached.medias[0];
                 if let Some(im) = media.to_raw_input_media() {
-                    let msg = InputMessage::new().html(caption).media(im);
+                    let msg = InputMessage::new()
+                        .html(caption)
+                        .media(im)
+                        .reply_to(reply_to_msg_id);
                     if client.send_message(chat, msg).await.is_ok() {
                         sent_any = true;
                     }
@@ -160,7 +169,7 @@ pub async fn handle_dl(
                     let mut input_media =
                         grammers_client::media::InputMedia::new().copy_media(media);
                     if idx == 0 {
-                        input_media = input_media.html(&caption);
+                        input_media = input_media.html(&caption).reply_to(reply_to_msg_id);
                     }
                     album_medias.push(input_media);
                 }
@@ -171,7 +180,10 @@ pub async fn handle_dl(
 
             if sent_any && let Some(ref sep) = separate_text {
                 let _ = client
-                    .send_message(chat, InputMessage::new().html(sep))
+                    .send_message(
+                        chat,
+                        InputMessage::new().html(sep).reply_to(reply_to_msg_id),
+                    )
                     .await;
             }
 
@@ -338,7 +350,10 @@ pub async fn handle_dl(
         let (uploaded, meta) = uploads.into_iter().next().unwrap();
         let c = caption_to_send.take().unwrap_or_default();
         let media_msg = streaming::build_media_message(&c, &meta, uploaded);
-        match client.send_message(chat, media_msg).await {
+        match client
+            .send_message(chat, media_msg.reply_to(reply_to_msg_id))
+            .await
+        {
             Ok(msg) => {
                 if let Some(m) = msg.media() {
                     sent_medias.push(m);
@@ -410,7 +425,11 @@ pub async fn handle_dl(
                     } else {
                         String::new()
                     };
-                    streaming::build_media_input(&c, meta, uploaded.clone())
+                    let mut input = streaming::build_media_input(&c, meta, uploaded.clone());
+                    if i == 0 {
+                        input = input.reply_to(reply_to_msg_id);
+                    }
+                    input
                 })
                 .collect();
 
@@ -441,7 +460,10 @@ pub async fn handle_dl(
                         String::new()
                     };
                     let media_msg = streaming::build_media_message(&c, &meta, uploaded);
-                    match client.send_message(chat, media_msg).await {
+                    match client
+                        .send_message(chat, media_msg.reply_to(reply_to_msg_id))
+                        .await
+                    {
                         Ok(msg) => {
                             if let Some(m) = msg.media() {
                                 sent_medias.push(m);
@@ -473,7 +495,10 @@ pub async fn handle_dl(
                 String::new()
             };
             let media_msg = streaming::build_media_message(&c, &meta, uploaded);
-            match client.send_message(chat, media_msg).await {
+            match client
+                .send_message(chat, media_msg.reply_to(reply_to_msg_id))
+                .await
+            {
                 Ok(msg) => {
                     if let Some(m) = msg.media() {
                         sent_medias.push(m);
@@ -505,13 +530,19 @@ pub async fn handle_dl(
         && !cap.is_empty()
     {
         let _ = client
-            .send_message(chat, InputMessage::new().html(cap))
+            .send_message(
+                chat,
+                InputMessage::new().html(cap).reply_to(reply_to_msg_id),
+            )
             .await;
     }
 
     if let Some(ref sep) = separate_text {
         let _ = client
-            .send_message(chat, InputMessage::new().html(sep))
+            .send_message(
+                chat,
+                InputMessage::new().html(sep).reply_to(reply_to_msg_id),
+            )
             .await;
     }
 
