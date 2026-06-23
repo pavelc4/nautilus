@@ -27,6 +27,7 @@ pub struct AppState {
     /// Per-call timeouts are applied per-request via `.timeout(..)` on the builder, so a
     /// single connection pool + TLS state is reused instead of rebuilt on every command.
     pub http: reqwest::Client,
+    pub topic_settings: crate::bot::topic_settings::TopicSettings,
 }
 
 impl AppState {
@@ -58,6 +59,8 @@ impl AppState {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
+        let topic_settings = crate::bot::topic_settings::TopicSettings::load().await;
+
         let state = Arc::new(Self {
             client: session.client,
             config,
@@ -66,6 +69,7 @@ impl AppState {
             pending_downloads: Arc::new(dashmap::DashMap::new()),
             media_cache: Arc::new(dashmap::DashMap::new()),
             http,
+            topic_settings,
         });
 
         Ok((state, session.updates_rx))

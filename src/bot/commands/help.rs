@@ -11,6 +11,7 @@ pub fn cmd_help() -> InputMessage {
                 • /stats - Check bot status, cache hits, and server health.\n\
                 • /check - Run platform diagnostics and cookies health check.\n\
                 • /speedtest - Run download and upload speed test from Cloudflare.\n\
+                • /settingsid - Set or whitelist forum topic IDs for group restrictions.\n\
                 • /about - Read about the project tech stack and links.\n\
                 • /help - Display this commands guide.\n\n\
                 ✨ <b>Supported Platforms:</b>\n\
@@ -26,14 +27,12 @@ pub fn cmd_help() -> InputMessage {
                 • <b>LinkedIn</b> (Photos, Documents)\n\
                 • <b>TeraBox</b> (Direct file downloads)";
 
-    let buttons = vec![
-        vec![
-            Button::data("Back to Start", "cmd:start"),
-            Button::data("About Project", "cmd:about"),
-        ],
-    ];
+    let buttons = vec![vec![
+        Button::data("Back to Start", "cmd:start"),
+        Button::data("About Project", "cmd:about"),
+    ]];
 
-    InputMessage::new()
-        .html(text)
-        .reply_markup(grammers_client::message::ReplyMarkup::from_buttons(&buttons))
+    InputMessage::new().html(text).reply_markup(
+        grammers_client::message::ReplyMarkup::from_buttons(&buttons),
+    )
 }

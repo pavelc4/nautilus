@@ -199,6 +199,16 @@ async fn handle_message(
                 None => anyhow::bail!("no peer ref"),
             };
 
+            // Check if topic is allowed
+            let topic_id = crate::bot::topic_settings::get_message_topic_id(&msg);
+            if !state
+                .topic_settings
+                .is_topic_allowed(chat.id.bare_id_unchecked(), topic_id)
+                .await
+            {
+                return Ok(());
+            }
+
             tracing::info!(
                 sender = sender_id,
                 url,
@@ -323,6 +333,7 @@ async fn handle_message(
         "/stats",
         "/check",
         "/speedtest",
+        "/settingsid",
         "/help",
         "/about",
     ];
@@ -343,6 +354,18 @@ async fn handle_message(
         .ok()
         .flatten()
         .ok_or_else(|| anyhow::anyhow!("no peer ref"))?;
+
+    // Check if topic is allowed (exempt /settingsid)
+    if cmd != "/settingsid" {
+        let topic_id = crate::bot::topic_settings::get_message_topic_id(&msg);
+        if !state
+            .topic_settings
+            .is_topic_allowed(chat.id.bare_id_unchecked(), topic_id)
+            .await
+        {
+            return Ok(());
+        }
+    }
 
     match cmd {
         "/dl" | "/l" => {
@@ -438,6 +461,101 @@ async fn handle_message(
                             .client
                             .edit_message(chat, status_msg.id(), format!("Speedtest failed: {e}"))
                             .await;
+                    }
+                }
+            } else {
+                state
+                    .client
+                    .send_message(chat, "Permission denied.")
+                    .await?;
+            }
+        }
+        "/settingsid" => {
+            if sender_id == state.config.owner_id {
+                let is_group = match msg.peer() {
+                    Some(grammers_client::peer::Peer::Group(_))
+                    | Some(grammers_client::peer::Peer::Channel(_)) => true,
+                    _ => false,
+                };
+
+                if !is_group {
+                    state
+                        .client
+                        .send_message(chat, "This command can only be used in groups.")
+                        .await?;
+                    return Ok(());
+                }
+
+                if args.is_empty() {
+                    let map = state.topic_settings.whitelisted_topics.read().await;
+                    let current_topics = match map.get(&chat.id.bare_id_unchecked()) {
+                        Some(topics) if !topics.is_empty() => {
+                            let list = topics
+                                .iter()
+                                .map(|id| format!("<code>{}</code>", id))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("Whitelisted Topic IDs: {}", list)
+                        }
+                        _ => "No restrictions set (Any topic is allowed).".to_string(),
+                    };
+
+                    let response = format!(
+                        "Nautilus Topic Whitelist Settings\n\n\
+                         Current status: {}\n\n\
+                         To set whitelist: <code>/settingsid &lt;id1&gt; &lt;id2&gt; ...</code>\n\
+                         To clear: <code>/settingsid clear</code>",
+                        current_topics
+                    );
+                    state
+                        .client
+                        .send_message(chat, InputMessage::new().html(response))
+                        .await?;
+                } else if args.eq_ignore_ascii_case("clear") {
+                    state
+                        .topic_settings
+                        .set_allowed_topics(chat.id.bare_id_unchecked(), Vec::new())
+                        .await?;
+                    state
+                        .client
+                        .send_message(chat, "Cleared all whitelisted topic IDs for this group. Any topic is now allowed.")
+                        .await?;
+                } else {
+                    let mut topic_ids = Vec::new();
+                    let mut has_error = false;
+                    for part in args.split_whitespace() {
+                        match part.parse::<i32>() {
+                            Ok(id) => topic_ids.push(id),
+                            Err(_) => {
+                                has_error = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if has_error {
+                        state
+                            .client
+                            .send_message(chat, "Error: Topic IDs must be valid integers.")
+                            .await?;
+                    } else {
+                        state
+                            .topic_settings
+                            .set_allowed_topics(chat.id.bare_id_unchecked(), topic_ids.clone())
+                            .await?;
+                        let list = topic_ids
+                            .iter()
+                            .map(|id| format!("<code>{}</code>", id))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let msg_text = format!(
+                            "Successfully updated whitelisted topic IDs for this group to: {}",
+                            list
+                        );
+                        state
+                            .client
+                            .send_message(chat, InputMessage::new().html(msg_text))
+                            .await?;
                     }
                 }
             } else {

@@ -23,6 +23,7 @@ pin-project = "1"
 num_cpus = "1"
 tokio-stream = "0.1"
 url = "2"
+serde_json = "1"
 
 # panic="abort" intentionally omitted: the bot spawns a handler task per update,
 # and unwinding keeps a single panicking job from taking down the whole process.
