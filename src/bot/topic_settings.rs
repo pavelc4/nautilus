@@ -12,13 +12,12 @@ pub struct TopicSettings {
 impl TopicSettings {
     pub async fn load() -> Self {
         let path = Self::path();
-        if let Ok(data) = tokio::fs::read_to_string(&path).await {
-            if let Ok(map) = serde_json::from_str::<HashMap<i64, Vec<i32>>>(&data) {
+        if let Ok(data) = tokio::fs::read_to_string(&path).await
+            && let Ok(map) = serde_json::from_str::<HashMap<i64, Vec<i32>>>(&data) {
                 return Self {
                     whitelisted_topics: Arc::new(RwLock::new(map)),
                 };
             }
-        }
         Self::default()
     }
 
