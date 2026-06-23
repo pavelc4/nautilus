@@ -1,30 +1,26 @@
-use crate::provider::{MediaItem, MediaKind, MediaMeta, MediaReader};
+use crate::provider::{MediaItem, MediaMeta, MediaReader};
 use tokio_stream::StreamExt;
 
 pub fn parse_quality(quality: &str, label: &str) -> u32 {
     let score = |s: &str| {
         let clean: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
-        if !clean.is_empty() {
-            if let Ok(num) = clean.parse::<u32>() {
-                return Some(num);
-            }
+        if !clean.is_empty()
+            && let Ok(num) = clean.parse::<u32>()
+        {
+            return Some(num);
         }
         let lower = s.to_lowercase();
-        if lower.contains("hd") || lower.contains("high") || lower.contains("original") {
-            return Some(1080);
+        match () {
+            _ if lower.contains("hd") || lower.contains("high") || lower.contains("original") => {
+                Some(1080)
+            }
+            _ if lower.contains("medium") => Some(720),
+            _ if lower.contains("sd") || lower.contains("low") => Some(360),
+            _ => None,
         }
-        if lower.contains("medium") {
-            return Some(720);
-        }
-        if lower.contains("sd") || lower.contains("low") {
-            return Some(360);
-        }
-        None
     };
 
-    score(quality)
-        .or_else(|| score(label))
-        .unwrap_or(0)
+    score(quality).or_else(|| score(label)).unwrap_or(0)
 }
 
 pub fn sanitize_filename(title: &str, default: &str) -> String {
@@ -80,25 +76,75 @@ pub async fn fetch_stream(
     }
 }
 
+pub fn parse_dimensions(quality: &str, label: &str, is_vertical: bool) -> Option<(i32, i32)> {
+    let parse_w_h = |s: &str| {
+        let parts: Vec<&str> = s.split(['x', 'X', '*']).collect();
+        if parts.len() == 2 {
+            let w = parts[0]
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<i32>()
+                .ok();
+            let h = parts[1]
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<i32>()
+                .ok();
+            if let (Some(width), Some(height)) = (w, h) {
+                return Some((width, height));
+            }
+        }
+        None
+    };
+
+    if let Some(dims) = parse_w_h(quality) {
+        return Some(dims);
+    }
+    if let Some(dims) = parse_w_h(label) {
+        return Some(dims);
+    }
+
+    let extract_single = |s: &str| {
+        let clean: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+        if !clean.is_empty()
+            && let Ok(num) = clean.parse::<i32>()
+        {
+            match num {
+                1080 => {
+                    return Some(if is_vertical {
+                        (1080, 1920)
+                    } else {
+                        (1920, 1080)
+                    });
+                }
+                720 => {
+                    return Some(if is_vertical {
+                        (720, 1280)
+                    } else {
+                        (1280, 720)
+                    });
+                }
+                480 => return Some(if is_vertical { (480, 854) } else { (854, 480) }),
+                360 => return Some(if is_vertical { (360, 640) } else { (640, 360) }),
+                240 => return Some(if is_vertical { (240, 426) } else { (426, 240) }),
+                144 => return Some(if is_vertical { (144, 256) } else { (256, 144) }),
+                _ => {}
+            }
+        }
+        None
+    };
+
+    extract_single(quality).or_else(|| extract_single(label))
+}
+
 pub async fn download_item(
     client: &reqwest::Client,
     url: String,
-    kind: MediaKind,
-    mime_type: std::borrow::Cow<'static, str>,
-    filename: String,
-    title: Option<String>,
-    description: Option<String>,
+    mut meta: MediaMeta,
 ) -> anyhow::Result<MediaItem> {
     let (size, reader) = fetch_stream(client, &url).await?;
-    let meta = MediaMeta {
-        filename,
-        mime_type,
-        size,
-        duration_secs: None,
-        dims: None,
-        kind,
-        title,
-        description,
-    };
+    meta.size = size;
     Ok(MediaItem { meta, reader })
 }

@@ -128,6 +128,20 @@ pub async fn handle_dl(
             let mut metadata = String::new();
             metadata.push_str(&format!("🔗 Sumber: {}\n", get_source_link(&url)));
             metadata.push_str(&format!("🏷 Tipe: {type_str}\n"));
+            if cached.kind == MediaKind::Video {
+                let mut dims = None;
+                for m in &cached.medias {
+                    if let grammers_client::media::Media::Document(doc) = m
+                        && let Some(res) = doc.resolution()
+                    {
+                        dims = Some(res);
+                        break;
+                    }
+                }
+                if let Some((w, h)) = dims {
+                    metadata.push_str(&format!("📺 Resolusi: {w}x{h}\n"));
+                }
+            }
             metadata.push_str(&format!("💾 Ukuran: {:.2} MB\n", size_mb));
             if let Some(ref name) = sender_name {
                 metadata.push_str(&format!("👤 Oleh: {name}\n"));
@@ -271,6 +285,11 @@ pub async fn handle_dl(
     let mut metadata = String::new();
     metadata.push_str(&format!("🖇️ Source: {}\n", get_source_link(&url)));
     metadata.push_str(&format!("📄 Type: {type_str}\n"));
+    if kind == MediaKind::Video
+        && let Some((w, h)) = items[0].meta.dims
+    {
+        metadata.push_str(&format!("📺 Resolution: {w}x{h}\n"));
+    }
     metadata.push_str(&format!("📁 Size: {:.2} MB\n", size_mb));
     if let Some(ref name) = sender_name {
         metadata.push_str(&format!("👤 By: {name}\n"));

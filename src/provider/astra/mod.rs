@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::provider::{MediaItem, MediaKind, Provider};
+use crate::provider::{MediaItem, MediaKind, MediaMeta, Provider};
 
 pub mod client;
 pub mod endpoint;
@@ -69,8 +69,14 @@ impl Provider for AstraProvider {
 
         let mut items = Vec::new();
 
-        let wants_video = format == Some("video") || format.is_none() || format == Some("both") || format == Some("all");
-        let wants_photo = format == Some("photo") || format.is_none() || format == Some("both") || format == Some("all");
+        let wants_video = format == Some("video")
+            || format.is_none()
+            || format == Some("both")
+            || format == Some("all");
+        let wants_photo = format == Some("photo")
+            || format.is_none()
+            || format == Some("both")
+            || format == Some("all");
 
         if let Some(ref downloads) = data.downloads {
             let has_video_or_photo = downloads.iter().any(|d| {
@@ -119,51 +125,55 @@ impl Provider for AstraProvider {
                                 })
                             }
                         }
-                        "tiktok" => {
-                            video_items
-                                .iter()
-                                .find(|v| v.label.as_deref() == Some("No Watermark"))
-                                .or_else(|| {
-                                    video_items
-                                        .iter()
-                                        .find(|v| v.label.as_deref() == Some("HD"))
-                                })
-                                .or_else(|| {
-                                    video_items
-                                        .iter()
-                                        .find(|v| v.label.as_deref() == Some("Original"))
-                                })
-                                .or_else(|| {
-                                    video_items
-                                        .iter()
-                                        .find(|v| v.label.as_deref() == Some("With Watermark"))
-                                })
-                                .or_else(|| video_items.first())
-                                .copied()
-                        }
-                        _ => video_items
-                            .into_iter()
-                            .max_by_key(|v| {
-                                let q = v.quality.as_deref().unwrap_or("");
-                                let l = v.label.as_deref().unwrap_or("");
-                                parse_quality(q, l)
-                            }),
+                        "tiktok" => video_items
+                            .iter()
+                            .find(|v| v.label.as_deref() == Some("No Watermark"))
+                            .or_else(|| {
+                                video_items
+                                    .iter()
+                                    .find(|v| v.label.as_deref() == Some("HD"))
+                            })
+                            .or_else(|| {
+                                video_items
+                                    .iter()
+                                    .find(|v| v.label.as_deref() == Some("Original"))
+                            })
+                            .or_else(|| {
+                                video_items
+                                    .iter()
+                                    .find(|v| v.label.as_deref() == Some("With Watermark"))
+                            })
+                            .or_else(|| video_items.first())
+                            .copied(),
+                        _ => video_items.into_iter().max_by_key(|v| {
+                            let q = v.quality.as_deref().unwrap_or("");
+                            let l = v.label.as_deref().unwrap_or("");
+                            parse_quality(q, l)
+                        }),
                     };
 
                     if let Some(v) = selected_video {
                         let sanitized =
                             sanitize_filename(title.as_deref().unwrap_or("video"), "video");
                         let filename = format!("{sanitized}.mp4");
-                        let media_item = download_item(
-                            &self.client,
-                            v.url.clone(),
-                            MediaKind::Video,
-                            "video/mp4".into(),
+                        let q = v.quality.as_deref().unwrap_or("");
+                        let l = v.label.as_deref().unwrap_or("");
+                        let is_shorts = url.contains("/shorts/")
+                            || url.contains("/reel/")
+                            || url.contains("tiktok.com");
+                        let dims = parse_dimensions(q, l, is_shorts);
+
+                        let meta = MediaMeta {
                             filename,
-                            title.clone(),
-                            description.clone(),
-                        )
-                        .await?;
+                            mime_type: "video/mp4".into(),
+                            size: 0,
+                            duration_secs: None,
+                            dims,
+                            kind: MediaKind::Video,
+                            title: title.clone(),
+                            description: description.clone(),
+                        };
+                        let media_item = download_item(&self.client, v.url.clone(), meta).await?;
                         items.push(media_item);
                     }
                 }
@@ -173,23 +183,24 @@ impl Provider for AstraProvider {
                 let slideshow_items: Vec<_> = downloads
                     .iter()
                     .filter(|d| {
-                        d.media_type == AstraMediaType::Image || d.media_type == AstraMediaType::Slide
+                        d.media_type == AstraMediaType::Image
+                            || d.media_type == AstraMediaType::Slide
                     })
                     .collect();
                 for (idx, item) in slideshow_items.into_iter().enumerate() {
-                    let sanitized =
-                        sanitize_filename(title.as_deref().unwrap_or("image"), "image");
+                    let sanitized = sanitize_filename(title.as_deref().unwrap_or("image"), "image");
                     let filename = format!("{sanitized}_{idx}.jpg");
-                    let media_item = download_item(
-                        &self.client,
-                        item.url.clone(),
-                        MediaKind::Photo,
-                        "image/jpeg".into(),
+                    let meta = MediaMeta {
                         filename,
-                        title.clone(),
-                        description.clone(),
-                    )
-                    .await?;
+                        mime_type: "image/jpeg".into(),
+                        size: 0,
+                        duration_secs: None,
+                        dims: None,
+                        kind: MediaKind::Photo,
+                        title: title.clone(),
+                        description: description.clone(),
+                    };
+                    let media_item = download_item(&self.client, item.url.clone(), meta).await?;
                     items.push(media_item);
                 }
             }
@@ -200,23 +211,28 @@ impl Provider for AstraProvider {
                     .filter(|d| {
                         d.media_type == AstraMediaType::Audio
                             && d.quality.as_deref() != Some("storyboard")
-                            && !d.label.as_deref().unwrap_or("").to_lowercase().contains("mhtml")
+                            && !d
+                                .label
+                                .as_deref()
+                                .unwrap_or("")
+                                .to_lowercase()
+                                .contains("mhtml")
                     })
                     .collect();
                 if let Some(a) = audio_items.first() {
-                    let sanitized =
-                        sanitize_filename(title.as_deref().unwrap_or("audio"), "audio");
+                    let sanitized = sanitize_filename(title.as_deref().unwrap_or("audio"), "audio");
                     let filename = format!("{sanitized}.mp3");
-                    let media_item = download_item(
-                        &self.client,
-                        a.url.clone(),
-                        MediaKind::Audio,
-                        "audio/mpeg".into(),
+                    let meta = MediaMeta {
                         filename,
-                        title.clone(),
-                        description.clone(),
-                    )
-                    .await?;
+                        mime_type: "audio/mpeg".into(),
+                        size: 0,
+                        duration_secs: None,
+                        dims: None,
+                        kind: MediaKind::Audio,
+                        title: title.clone(),
+                        description: description.clone(),
+                    };
+                    let media_item = download_item(&self.client, a.url.clone(), meta).await?;
                     items.push(media_item);
                 }
             }
@@ -259,16 +275,17 @@ impl Provider for AstraProvider {
                 let sanitized =
                     sanitize_filename(title.as_deref().unwrap_or(default_base), default_base);
                 let filename = format!("{sanitized}_{segment_idx}.{ext}");
-                let media_item = download_item(
-                    &self.client,
-                    url,
-                    kind,
-                    mime_type.into(),
+                let meta = MediaMeta {
                     filename,
-                    if idx == 0 { title.clone() } else { None },
-                    if idx == 0 { description.clone() } else { None },
-                )
-                .await?;
+                    mime_type: mime_type.into(),
+                    size: 0,
+                    duration_secs: None,
+                    dims: None,
+                    kind,
+                    title: if idx == 0 { title.clone() } else { None },
+                    description: if idx == 0 { description.clone() } else { None },
+                };
+                let media_item = download_item(&self.client, url, meta).await?;
                 items.push(media_item);
             }
         }
@@ -312,23 +329,24 @@ impl Provider for AstraProvider {
         let mut has_audio = false;
 
         if let Some(ref downloads) = data.downloads {
-            has_video = downloads
-                .iter()
-                .any(|d| {
-                    d.media_type == AstraMediaType::Video
-                        && !d.url.contains(".m3u8")
-                        && !d.url.contains("hls_playlist")
-                });
+            has_video = downloads.iter().any(|d| {
+                d.media_type == AstraMediaType::Video
+                    && !d.url.contains(".m3u8")
+                    && !d.url.contains("hls_playlist")
+            });
             has_photo = downloads.iter().any(|d| {
                 d.media_type == AstraMediaType::Image || d.media_type == AstraMediaType::Slide
             });
-            has_audio = downloads
-                .iter()
-                .any(|d| {
-                    d.media_type == AstraMediaType::Audio
-                        && d.quality.as_deref() != Some("storyboard")
-                        && !d.label.as_deref().unwrap_or("").to_lowercase().contains("mhtml")
-                });
+            has_audio = downloads.iter().any(|d| {
+                d.media_type == AstraMediaType::Audio
+                    && d.quality.as_deref() != Some("storyboard")
+                    && !d
+                        .label
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains("mhtml")
+            });
         }
 
         if let Some(ref photos) = data.photos
