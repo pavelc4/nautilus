@@ -42,6 +42,11 @@ pub fn sanitize_filename(title: &str, default: &str) -> String {
     }
 }
 
+/// Read-ahead buffer for the CDN->Telegram stream-through. Sized to Telegram's
+/// 512 KiB upload part so grammers fills a whole part per refill instead of ~4
+/// (128 KiB before). Larger gives diminishing returns — the part size caps it.
+const STREAM_BUF_BYTES: usize = 512 * 1024;
+
 pub async fn fetch_stream(
     client: &reqwest::Client,
     url: &str,
@@ -61,8 +66,11 @@ pub async fn fetch_stream(
     let stream_reader = tokio_util::io::StreamReader::new(stream);
 
     if size == 0 {
+        // its size (Telegram needs total parts up front). Fine for small clips,
+        // a memory bomb for a 2 GB video. Upgrade path: HEAD/Range preflight for
+        // size, or spill to a temp file, so memory stays flat. See streaming notes.
         use tokio::io::AsyncReadExt;
-        let mut buf_reader = tokio::io::BufReader::new(stream_reader);
+        let mut buf_reader = tokio::io::BufReader::with_capacity(STREAM_BUF_BYTES, stream_reader);
         let mut buffer = Vec::new();
         buf_reader.read_to_end(&mut buffer).await?;
         size = buffer.len() as u64;
@@ -70,7 +78,7 @@ pub async fn fetch_stream(
         let reader: MediaReader = Box::pin(cursor);
         Ok((size, reader))
     } else {
-        let buffered = tokio::io::BufReader::with_capacity(128 * 1024, stream_reader);
+        let buffered = tokio::io::BufReader::with_capacity(STREAM_BUF_BYTES, stream_reader);
         let reader: MediaReader = Box::pin(buffered);
         Ok((size, reader))
     }
