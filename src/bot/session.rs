@@ -3,13 +3,13 @@ use std::sync::Arc;
 use grammers_client::Client;
 use grammers_mtsender::SenderPool;
 use grammers_session::storages::SqliteSession;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 use crate::config::Config;
 
 pub struct BotSession {
     pub client: Client,
-    pub updates_rx: UnboundedReceiver<grammers_session::updates::UpdatesLike>,
+    pub updates_rx: Receiver<grammers_session::updates::UpdatesLike>,
     pub bot_username: String,
 }
 

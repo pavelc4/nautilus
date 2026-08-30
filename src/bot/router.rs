@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
-use grammers_client::client::UpdatesConfiguration;
 use grammers_client::message::InputMessage;
 use grammers_client::update::Update;
-use tokio::sync::mpsc::UnboundedReceiver;
+use grammers_mtsender::UpdatesConfiguration;
+use tokio::sync::mpsc::Receiver;
 
 use crate::app::AppState;
 use crate::bot::commands;
 
 pub async fn run(
     state: Arc<AppState>,
-    updates_rx: UnboundedReceiver<grammers_session::updates::UpdatesLike>,
+    updates_rx: Receiver<grammers_session::updates::UpdatesLike>,
 ) -> anyhow::Result<()> {
     tracing::info!("starting update loop");
 

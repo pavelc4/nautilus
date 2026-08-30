@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use grammers_client::Client;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 use crate::bot::status::BotStats;
 use crate::config::Config;
@@ -35,7 +35,7 @@ impl AppState {
         config: Config,
     ) -> anyhow::Result<(
         Arc<Self>,
-        UnboundedReceiver<grammers_session::updates::UpdatesLike>,
+        Receiver<grammers_session::updates::UpdatesLike>,
     )> {
         let session = crate::bot::session::build_client(&config).await?;
 
