@@ -17,6 +17,7 @@ pub enum AstraEndpoint {
     SoundcloudDownload,
     CapcutDownload,
     LinkedinDownload,
+    PixivDownload,
 }
 
 impl AstraEndpoint {
@@ -39,6 +40,7 @@ impl AstraEndpoint {
             Self::SoundcloudDownload => "/api/soundcloud/download",
             Self::CapcutDownload => "/api/capcut/download",
             Self::LinkedinDownload => "/api/linkedin/download",
+            Self::PixivDownload => "/api/pixiv/download",
         }
     }
 
@@ -61,6 +63,7 @@ impl AstraEndpoint {
             Self::SoundcloudDownload => "soundcloud",
             Self::CapcutDownload => "capcut",
             Self::LinkedinDownload => "linkedin",
+            Self::PixivDownload => "pixiv",
         }
     }
 }
@@ -144,6 +147,7 @@ impl TryFrom<&url::Url> for AstraEndpoint {
             h if contains_ci(h, "soundcloud.com") => Ok(Self::SoundcloudDownload),
             h if contains_ci(h, "capcut.com") => Ok(Self::CapcutDownload),
             h if contains_ci(h, "linkedin.com") => Ok(Self::LinkedinDownload),
+            h if contains_ci(h, "pixiv.net") => Ok(Self::PixivDownload),
             _ => anyhow::bail!("unsupported domain: {host}"),
         }
     }
@@ -278,5 +282,21 @@ mod tests {
             AstraEndpoint::try_from(&profile_url).unwrap(),
             AstraEndpoint::InstagramProfile
         );
+    }
+
+    #[test]
+    fn test_pixiv_routing() {
+        let urls = [
+            "https://www.pixiv.net/artworks/145960605",
+            "https://pixiv.net/en/artworks/145960605",
+            "https://www.pixiv.net/users/18818121",
+        ];
+        for u in urls {
+            let parsed = Url::parse(u).unwrap();
+            assert_eq!(
+                AstraEndpoint::try_from(&parsed).unwrap(),
+                AstraEndpoint::PixivDownload
+            );
+        }
     }
 }

@@ -59,10 +59,21 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
             match () {
                 _ if data.starts_with("dl:") => {
                     let parts: Vec<&str> = data.split(':').collect();
-                    if let [_, format, id] = parts.as_slice() {
-                        let url_opt = state.pending_downloads.get(*id).map(|r| r.value().clone());
-                        match url_opt {
-                            Some(url) => {
+                    // dl:{format}:{id}
+                    let (format, id): (String, String) = match parts.as_slice() {
+                        [_, format, id] => (format.to_string(), id.to_string()),
+                        _ => {
+                            let _ = query
+                                .answer()
+                                .alert("Invalid download request.")
+                                .send()
+                                .await;
+                            return Ok(());
+                        }
+                    };
+                    let url_opt = state.pending_downloads.get(&id).map(|r| r.value().clone());
+                    match url_opt {
+                        Some(url) => {
                                 let _ = query.answer().send().await;
 
                                 let reply_to_id =
@@ -87,15 +98,15 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                                         .await;
                                 }
 
-                                match *format {
+                                match format.as_str() {
                                     "cancel" => {
-                                        state.pending_downloads.remove(*id);
+                                        state.pending_downloads.remove(&id);
                                     }
                                     _ => {
                                         if let Ok(Some(chat_ref)) = query.peer_ref().await {
                                             let state = state.clone();
-                                            let format_clone = format.to_string();
-                                            let id_clone = id.to_string();
+                                            let format_clone = format.clone();
+                                            let id_clone = id.clone();
 
                                             let sender_name = match query.sender() {
                                                 Some(grammers_client::peer::Peer::User(user)) => {
@@ -150,11 +161,8 @@ async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<
                             }
                         }
                     }
-                }
-                _ if data == "cmd:start" || data == "cmd:help" || data == "cmd:about" => {
-                    let _ = query.answer().send().await;
-                    // Not a let-chain: keeps the `&query.raw` borrow out of the .await below
-                    // so the spawned handler future stays Send.
+                    _ if data == "cmd:start" || data == "cmd:help" || data == "cmd:about" => {
+                        let _ = query.answer().send().await;
                     if let Ok(Some(chat_ref)) = query.peer_ref().await
                         && let grammers_client::tl::enums::Update::BotCallbackQuery(update) =
                             &query.raw

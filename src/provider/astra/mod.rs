@@ -24,21 +24,10 @@ impl AstraProvider {
             .unwrap_or_else(|_| reqwest::Client::new());
         Self { api_url, client }
     }
-}
 
-#[async_trait]
-impl Provider for AstraProvider {
-    fn can_handle(&self, url: &str) -> bool {
-        let Ok(parsed) = url::Url::parse(url) else {
-            return false;
-        };
-        AstraEndpoint::try_from(&parsed).is_ok()
-    }
-
-    async fn resolve(&self, url: &str, format: Option<&str>) -> anyhow::Result<Vec<MediaItem>> {
+    async fn fetch_data(&self, url: &str) -> anyhow::Result<AstraData> {
         let parsed_url = url::Url::parse(url)?;
         let endpoint = AstraEndpoint::try_from(&parsed_url)?;
-        let platform = endpoint.platform();
 
         let mut api_url = url::Url::parse(&self.api_url)?;
         api_url.set_path(endpoint.path());
@@ -56,9 +45,27 @@ impl Provider for AstraProvider {
             anyhow::bail!("Astra error: {}", api_resp.message);
         }
 
-        let data = api_resp
+        api_resp
             .data
-            .ok_or_else(|| anyhow::anyhow!("Astra returned success but no data"))?;
+            .ok_or_else(|| anyhow::anyhow!("Astra returned success but no data"))
+    }
+}
+
+#[async_trait]
+impl Provider for AstraProvider {
+    fn can_handle(&self, url: &str) -> bool {
+        let Ok(parsed) = url::Url::parse(url) else {
+            return false;
+        };
+        AstraEndpoint::try_from(&parsed).is_ok()
+    }
+
+    async fn resolve(&self, url: &str, format: Option<&str>) -> anyhow::Result<Vec<MediaItem>> {
+        let parsed_url = url::Url::parse(url)?;
+        let endpoint = AstraEndpoint::try_from(&parsed_url)?;
+        let platform = endpoint.platform();
+
+        let data = self.fetch_data(url).await?;
 
         let title = data.title.clone().or_else(|| data.caption.clone());
         let description = if data.title.is_some() {
@@ -78,7 +85,22 @@ impl Provider for AstraProvider {
             || format == Some("both")
             || format == Some("all");
 
-        if let Some(ref downloads) = data.downloads {
+        // `page:{idx}` downloads only the Nth image/slide in a multi-page artwork.
+        let page_index = format.and_then(|f| f.strip_prefix("page:")).and_then(|n| n.parse::<usize>().ok());
+
+        if let Some(mut downloads) = data.downloads {
+            if let Some(idx) = page_index {
+                downloads = downloads
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(i, d)| {
+                        *i == idx
+                            && (d.media_type == AstraMediaType::Image
+                                || d.media_type == AstraMediaType::Slide)
+                    })
+                    .map(|(_, d)| d)
+                    .collect();
+            }
             let has_video_or_photo = downloads.iter().any(|d| {
                 (d.media_type == AstraMediaType::Video
                     && !d.url.contains(".m3u8")
@@ -87,6 +109,10 @@ impl Provider for AstraProvider {
                     || d.media_type == AstraMediaType::Slide
             });
             let wants_audio = format == Some("audio") || (format.is_none() && !has_video_or_photo);
+
+            // Per-page selection only ever yields a photo.
+            let wants_photo = wants_photo || page_index.is_some();
+            let wants_video = wants_video && page_index.is_none();
 
             if wants_video {
                 let video_items: Vec<_> = downloads
