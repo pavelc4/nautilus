@@ -1,4 +1,5 @@
 use crate::provider::{MediaItem, MediaMeta, MediaReader};
+use std::borrow::Cow;
 use tokio_stream::StreamExt;
 
 pub fn parse_quality(quality: &str, label: &str) -> u32 {
@@ -50,7 +51,7 @@ const STREAM_BUF_BYTES: usize = 512 * 1024;
 pub async fn fetch_stream(
     client: &reqwest::Client,
     url: &str,
-) -> anyhow::Result<(u64, MediaReader)> {
+) -> anyhow::Result<(u64, MediaReader, Option<String>)> {
     let resp = client
         .get(url)
         .header(reqwest::header::ACCEPT_ENCODING, "identity")
@@ -59,6 +60,11 @@ pub async fn fetch_stream(
     if !resp.status().is_success() {
         anyhow::bail!("Failed to fetch stream from CDN: {}", resp.status());
     }
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(';').next().unwrap_or(s).trim().to_lowercase());
     let mut size = resp.content_length().unwrap_or(0);
     let stream = resp
         .bytes_stream()
@@ -76,11 +82,11 @@ pub async fn fetch_stream(
         size = buffer.len() as u64;
         let cursor = std::io::Cursor::new(buffer);
         let reader: MediaReader = Box::pin(cursor);
-        Ok((size, reader))
+        Ok((size, reader, content_type))
     } else {
         let buffered = tokio::io::BufReader::with_capacity(STREAM_BUF_BYTES, stream_reader);
         let reader: MediaReader = Box::pin(buffered);
-        Ok((size, reader))
+        Ok((size, reader, content_type))
     }
 }
 
@@ -152,7 +158,30 @@ pub async fn download_item(
     url: String,
     mut meta: MediaMeta,
 ) -> anyhow::Result<MediaItem> {
-    let (size, reader) = fetch_stream(client, &url).await?;
+    let (size, reader, content_type) = fetch_stream(client, &url).await?;
     meta.size = size;
+    // Photos must match the actual on-wire type: a source that returns PNG
+    // (e.g. Pixiv originals) but is labelled image/jpeg makes Telegram reject
+    // the upload with PHOTO_SAVE_FILE_INVALID.
+    if meta.kind == crate::provider::MediaKind::Photo {
+        if let Some(ext) = image_ext(content_type.as_deref()) {
+            let mime = format!("image/{ext}");
+            meta.mime_type = Cow::Owned(mime);
+            if let Some(dot) = meta.filename.rfind('.') {
+                meta.filename.replace_range(dot.., &format!(".{ext}"));
+            }
+        }
+    }
     Ok(MediaItem { meta, reader })
+}
+
+fn image_ext(content_type: Option<&str>) -> Option<&'static str> {
+    match content_type {
+        Some("image/png") => Some("png"),
+        Some("image/jpeg") | Some("image/jpg") => Some("jpg"),
+        Some("image/webp") => Some("webp"),
+        Some("image/gif") => Some("gif"),
+        Some("image/bmp") => Some("bmp"),
+        _ => None,
+    }
 }

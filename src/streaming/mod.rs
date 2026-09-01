@@ -13,6 +13,16 @@ use crate::streaming::progress::ProgressReader;
 
 pub mod progress;
 
+/// Telegram rejects inline photos over ~10 MB with PHOTO_SAVE_FILE_INVALID;
+/// larger images must be sent as documents.
+const PHOTO_MAX_SIZE: u64 = 10 * 1024 * 1024;
+
+/// Photos over Telegram's inline-photo size ceiling are sent as documents so
+/// they don't fail with PHOTO_SAVE_FILE_INVALID.
+fn send_as_photo(meta: &MediaMeta) -> bool {
+    meta.kind == MediaKind::Photo && meta.size <= PHOTO_MAX_SIZE
+}
+
 pub async fn upload_media(
     client: &Client,
     chat: PeerRef,
@@ -132,16 +142,10 @@ pub fn build_media_message(caption: &str, meta: &MediaMeta, uploaded: Uploaded) 
     let mut msg = InputMessage::new().html(caption);
     msg = msg.mime_type(&meta.mime_type);
 
-    match meta.kind {
-        MediaKind::Video => {
-            msg = msg.document(uploaded);
-        }
-        MediaKind::Photo => {
-            msg = msg.photo(uploaded);
-        }
-        MediaKind::Audio => {
-            msg = msg.document(uploaded);
-        }
+    if send_as_photo(meta) {
+        msg = msg.photo(uploaded);
+    } else {
+        msg = msg.document(uploaded);
     }
 
     if let MediaKind::Video = meta.kind {
@@ -164,13 +168,10 @@ pub fn build_media_input(caption: &str, meta: &MediaMeta, uploaded: Uploaded) ->
     }
     media = media.mime_type(&meta.mime_type);
 
-    match meta.kind {
-        MediaKind::Photo => {
-            media = media.photo(uploaded);
-        }
-        MediaKind::Video | MediaKind::Audio => {
-            media = media.document(uploaded);
-        }
+    if send_as_photo(meta) {
+        media = media.photo(uploaded);
+    } else {
+        media = media.document(uploaded);
     }
 
     if let MediaKind::Video = meta.kind {
