@@ -226,8 +226,12 @@ impl Provider for AstraProvider {
                         title: title.clone(),
                         description: description.clone(),
                     };
-                    let media_item = download_item(&self.client, item.url.clone(), meta).await?;
-                    items.push(media_item);
+                    // Skip a photo whose CDN fetch fails (403 on a stale/oversized
+                    // variant) rather than aborting the whole slideshow.
+                    match download_item(&self.client, item.url.clone(), meta).await {
+                        Ok(media_item) => items.push(media_item),
+                        Err(e) => tracing::warn!(idx, error = %e, "skipping slideshow photo: CDN fetch failed"),
+                    }
                 }
             }
 
@@ -317,8 +321,13 @@ impl Provider for AstraProvider {
                     title: if idx == 0 { title.clone() } else { None },
                     description: if idx == 0 { description.clone() } else { None },
                 };
-                let media_item = download_item(&self.client, url, meta).await?;
-                items.push(media_item);
+                // Skip an item whose CDN fetch fails (e.g. FB returns 403 for a
+                // stale/oversized variant) rather than aborting the whole album —
+                // deliver the rest instead of failing the entire download.
+                match download_item(&self.client, url, meta).await {
+                    Ok(media_item) => items.push(media_item),
+                    Err(e) => tracing::warn!(idx, error = %e, "skipping media item: CDN fetch failed"),
+                }
             }
         }
 
