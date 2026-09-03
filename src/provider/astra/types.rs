@@ -48,6 +48,15 @@ pub struct AstraPhotoVariant {
 #[derive(Debug, Deserialize, Clone)]
 pub struct AstraVideoItem {
     pub url: String,
+    // Meta (Facebook/Instagram) returns a single video as quality variants
+    // (hd, sd, ...) that all share one poster thumbnail; a real carousel has
+    // distinct videos with distinct posters. Both fields drive best-variant
+    // selection in resolve(). quality has no omitempty upstream; thumbnail is
+    // nullable — default keeps deserialization working when either is absent.
+    #[serde(default)]
+    pub quality: Option<String>,
+    #[serde(default)]
+    pub thumbnail: Option<String>,
 }
 
 impl AstraPhotoItem {

@@ -277,7 +277,13 @@ impl Provider for AstraProvider {
             }
 
             if wants_video {
-                for (idx, v) in data.videos.iter().flatten().enumerate() {
+                // Meta returns a single video as quality variants (hd, sd) sharing
+                // one poster; a carousel has distinct videos with distinct posters.
+                // Keep only the best quality per poster so we send one best video
+                // per real video, not hd+sd duplicates.
+                for (idx, v) in
+                    select_best_videos(data.videos.as_deref().unwrap_or(&[])).into_iter().enumerate()
+                {
                     extracted_media.push((v.url.clone(), MediaKind::Video, idx));
                 }
             }
@@ -392,5 +398,77 @@ impl Provider for AstraProvider {
             has_photo,
             has_audio,
         })
+    }
+}
+
+/// Collapse Meta video quality-variants down to the best one per poster.
+///
+/// A Facebook/Instagram single video comes back as several entries (hd, sd, …)
+/// that all carry the same `thumbnail` (poster); a real carousel has distinct
+/// videos with distinct posters. Group by poster and keep the highest-quality
+/// entry per group — order-preserving — so the bot sends one best video per
+/// real video instead of hd+sd duplicates. Entries with no thumbnail are treated
+/// as distinct (kept as-is), so a source that omits posters is never over-merged.
+fn select_best_videos(videos: &[AstraVideoItem]) -> Vec<&AstraVideoItem> {
+    let mut groups: Vec<(Option<&str>, &AstraVideoItem)> = Vec::new();
+    for v in videos {
+        let key = v.thumbnail.as_deref().filter(|t| !t.is_empty());
+        if let Some(k) = key
+            && let Some(slot) = groups.iter_mut().find(|(gk, _)| *gk == Some(k))
+        {
+            let cur = parse_quality(slot.1.quality.as_deref().unwrap_or(""), "");
+            let cand = parse_quality(v.quality.as_deref().unwrap_or(""), "");
+            if cand > cur {
+                slot.1 = v;
+            }
+            continue;
+        }
+        groups.push((key, v));
+    }
+    groups.into_iter().map(|(_, v)| v).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vid(url: &str, quality: &str, thumb: Option<&str>) -> AstraVideoItem {
+        AstraVideoItem {
+            url: url.to_string(),
+            quality: Some(quality.to_string()),
+            thumbnail: thumb.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn single_video_variants_collapse_to_best() {
+        // hd + sd of ONE video (same poster) -> keep hd only.
+        let vids = [
+            vid("https://cdn/hd.mp4", "hd", Some("poster")),
+            vid("https://cdn/sd.mp4", "sd", Some("poster")),
+        ];
+        let best = select_best_videos(&vids);
+        assert_eq!(best.len(), 1);
+        assert_eq!(best[0].url, "https://cdn/hd.mp4");
+    }
+
+    #[test]
+    fn distinct_posters_are_kept() {
+        // A real carousel: two different videos with different posters -> keep both.
+        let vids = [
+            vid("https://cdn/a.mp4", "hd", Some("posterA")),
+            vid("https://cdn/b.mp4", "hd", Some("posterB")),
+        ];
+        assert_eq!(select_best_videos(&vids).len(), 2);
+    }
+
+    #[test]
+    fn missing_thumbnail_never_over_merges() {
+        // No posters -> treat each as distinct rather than collapsing to one.
+        let vids = [
+            vid("https://cdn/a.mp4", "hd", None),
+            vid("https://cdn/b.mp4", "sd", None),
+        ];
+        assert_eq!(select_best_videos(&vids).len(), 2);
     }
 }
