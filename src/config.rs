@@ -10,6 +10,7 @@ pub struct Config {
 
     pub max_file_size_mb: Option<u64>,
     pub progress_edit_secs: Option<u64>,
+    pub worker_concurrency: Option<usize>,
 }
 
 impl Config {
@@ -24,5 +25,9 @@ impl Config {
 
     pub fn progress_edit_secs(&self) -> u64 {
         self.progress_edit_secs.unwrap_or(3)
+    }
+
+    pub fn worker_concurrency(&self) -> usize {
+        self.worker_concurrency.unwrap_or_else(|| num_cpus::get().max(4))
     }
 }

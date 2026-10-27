@@ -38,6 +38,8 @@ struct AstraHealthRequests {
 struct AstraHealthCookies {
     instagram: bool,
     facebook: bool,
+    #[serde(default)]
+    pixiv: bool,
 }
 
 #[derive(Deserialize)]
@@ -211,6 +213,11 @@ async fn query_astra_health(client: &reqwest::Client, api_url: &str) -> String {
     } else {
         "Missing"
     };
+    let pixiv_cookie = if data.cookies.pixiv {
+        "Loaded"
+    } else {
+        "Missing"
+    };
 
     format!(
         "\u{251c} Status: {} (Go {})\n\
@@ -220,7 +227,8 @@ async fn query_astra_health(client: &reqwest::Client, api_url: &str) -> String {
         \u{2502}  \u{2514} Fail: {}\n\
         \u{251c} Cookies:\n\
         \u{2502}  \u{251c} Instagram: {}\n\
-        \u{2502}  \u{2514} Facebook: {}\n\
+        \u{2502}  \u{251c} Facebook: {}\n\
+        \u{2502}  \u{2514} Pixiv: {}\n\
         \u{251c} Goroutines: {}\n\
         \u{251c} Memory:\n\
         \u{2502}  \u{251c} Heap Alloc: {}\n\
@@ -237,6 +245,7 @@ async fn query_astra_health(client: &reqwest::Client, api_url: &str) -> String {
         data.requests.failed,
         ig_cookie,
         fb_cookie,
+        pixiv_cookie,
         data.goroutines,
         format_memory(heap_alloc_mb),
         format_memory(heap_inuse_mb),
@@ -350,11 +359,14 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
         .as_deref()
         .unwrap_or("http://localhost:3000");
     let astra_status = query_astra_health(&state.http, astra_url).await;
+    let total_workers = stats.total_workers();
+    let active_workers = stats.active_workers();
 
     let text = format!(
         "⚡️ <b>Nautilus Status Dashboard</b> (Ping: {ping_ms:.0}ms)\n\n\
          <b>Pipeline:</b>\n\
          ├ <b>Health:</b> {}\n\
+         ├ <b>Workers:</b> {active_workers} active / {total_workers} online\n\
          ├ <b>Processed:</b> {processed}\n\
          │  ├ <b>OK:</b> {ok}\n\
          │  └ <b>Failed:</b> {fail}\n\

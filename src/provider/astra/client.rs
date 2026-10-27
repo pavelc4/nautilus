@@ -163,13 +163,13 @@ pub async fn download_item(
     // Photos must match the actual on-wire type: a source that returns PNG
     // (e.g. Pixiv originals) but is labelled image/jpeg makes Telegram reject
     // the upload with PHOTO_SAVE_FILE_INVALID.
-    if meta.kind == crate::provider::MediaKind::Photo {
-        if let Some(ext) = image_ext(content_type.as_deref()) {
-            let mime = format!("image/{ext}");
-            meta.mime_type = Cow::Owned(mime);
-            if let Some(dot) = meta.filename.rfind('.') {
-                meta.filename.replace_range(dot.., &format!(".{ext}"));
-            }
+    if meta.kind == crate::provider::MediaKind::Photo
+        && let Some(ext) = image_ext(content_type.as_deref())
+    {
+        let mime = format!("image/{ext}");
+        meta.mime_type = Cow::Owned(mime);
+        if let Some(dot) = meta.filename.rfind('.') {
+            meta.filename.replace_range(dot.., &format!(".{ext}"));
         }
     }
     Ok(MediaItem { meta, reader })

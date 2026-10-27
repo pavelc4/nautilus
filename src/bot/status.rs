@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 pub struct BotStats {
     boot_time: Instant,
     bot_username: String,
+    total_workers: AtomicU64,
+    active_workers: AtomicU64,
     processed_total: AtomicU64,
     processed_ok: AtomicU64,
     processed_fail: AtomicU64,
@@ -17,6 +19,8 @@ impl BotStats {
         Self {
             boot_time: Instant::now(),
             bot_username,
+            total_workers: AtomicU64::new(0),
+            active_workers: AtomicU64::new(0),
             processed_total: AtomicU64::new(0),
             processed_ok: AtomicU64::new(0),
             processed_fail: AtomicU64::new(0),
@@ -27,6 +31,30 @@ impl BotStats {
 
     pub fn uptime(&self) -> Duration {
         self.boot_time.elapsed()
+    }
+
+    pub fn total_workers(&self) -> u64 {
+        self.total_workers.load(Ordering::Relaxed)
+    }
+
+    pub fn set_total_workers(&self, count: u64) {
+        self.total_workers.store(count, Ordering::Relaxed);
+    }
+
+    pub fn active_workers(&self) -> u64 {
+        self.active_workers.load(Ordering::Relaxed)
+    }
+
+    pub fn incr_active_workers(&self) {
+        self.active_workers.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn decr_active_workers(&self) {
+        let _ = self
+            .active_workers
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
+                Some(val.saturating_sub(1))
+            });
     }
 
     pub fn record_success(&self) {
@@ -72,5 +100,34 @@ impl BotStats {
     }
     pub fn cache_hits(&self) -> u64 {
         self.cache_hits.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worker_counters_should_increment_and_decrement_safely() {
+        let stats = BotStats::new("test_bot".to_string());
+        assert_eq!(stats.total_workers(), 0);
+        assert_eq!(stats.active_workers(), 0);
+
+        stats.set_total_workers(8);
+        assert_eq!(stats.total_workers(), 8);
+
+        stats.incr_active_workers();
+        stats.incr_active_workers();
+        assert_eq!(stats.active_workers(), 2);
+
+        stats.decr_active_workers();
+        assert_eq!(stats.active_workers(), 1);
+
+        stats.decr_active_workers();
+        assert_eq!(stats.active_workers(), 0);
+
+        // Underflow protection
+        stats.decr_active_workers();
+        assert_eq!(stats.active_workers(), 0);
     }
 }

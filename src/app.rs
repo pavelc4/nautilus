@@ -61,11 +61,14 @@ impl AppState {
 
         let topic_settings = crate::bot::topic_settings::TopicSettings::load().await;
 
+        let bot_stats = BotStats::new(session.bot_username);
+        bot_stats.set_total_workers(config.worker_concurrency() as u64);
+
         let state = Arc::new(Self {
             client: session.client,
             config,
             registry,
-            bot_stats: BotStats::new(session.bot_username),
+            bot_stats,
             pending_downloads: Arc::new(dashmap::DashMap::new()),
             media_cache: Arc::new(dashmap::DashMap::new()),
             http,

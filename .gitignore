@@ -1,6 +1,7 @@
 /target
 .env
 /data
+/grammers
 
 # dev artifacts
 .skills/

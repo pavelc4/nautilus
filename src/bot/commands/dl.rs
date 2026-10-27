@@ -52,6 +52,7 @@ struct JobGuard {
 impl JobGuard {
     fn new(state: Arc<AppState>) -> Self {
         state.bot_stats.incr_active_jobs();
+        state.bot_stats.incr_active_workers();
         Self { state }
     }
 }
@@ -59,6 +60,7 @@ impl JobGuard {
 impl Drop for JobGuard {
     fn drop(&mut self) {
         self.state.bot_stats.decr_active_jobs();
+        self.state.bot_stats.decr_active_workers();
     }
 }
 

@@ -24,6 +24,7 @@ pub fn cmd_help() -> InputMessage {
                 • <b>SoundCloud</b> (Audio/Tracks)\n\
                 • <b>Spotify</b> (Tracks/Audio metadata)\n\
                 • <b>Pinterest</b> (Videos, Photos)\n\
+                • <b>Pixiv</b> (Illustrations, Manga, Novels, Ugoira)\n\
                 • <b>LinkedIn</b> (Photos, Documents)\n\
                 • <b>TeraBox</b> (Direct file downloads)";
 
