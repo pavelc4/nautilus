@@ -50,7 +50,7 @@ impl BotStats {
     pub fn decr_active_jobs(&self) {
         let _ = self
             .active_jobs
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
                 Some(val.saturating_sub(1))
             });
     }
