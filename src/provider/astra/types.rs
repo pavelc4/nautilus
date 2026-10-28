@@ -9,6 +9,8 @@ pub struct AstraResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct AstraData {
+    #[serde(rename = "type")]
+    pub result_type: Option<String>,
     pub title: Option<String>,
     pub caption: Option<String>,
     pub thumbnail: Option<String>,

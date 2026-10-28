@@ -75,11 +75,12 @@ impl Provider for AstraProvider {
         };
 
         let twitter_has_video = platform == "twitter"
-            && data
-                .downloads
-                .as_ref()
-                .map(|dl| dl.iter().any(|d| d.media_type == AstraMediaType::Video))
-                .unwrap_or(false);
+            && (data.result_type.as_deref() == Some("video")
+                || data
+                    .downloads
+                    .as_ref()
+                    .map(|dl| dl.iter().any(|d| d.media_type == AstraMediaType::Video))
+                    .unwrap_or(false));
 
         let video_thumb = data.thumbnail.clone().or_else(|| {
             data.downloads.as_ref().and_then(|dl| {
@@ -386,55 +387,66 @@ impl Provider for AstraProvider {
             .data
             .ok_or_else(|| anyhow::anyhow!("Astra returned success but no data"))?;
 
-        let mut has_video = false;
-        let mut has_photo = false;
-        let mut has_audio = false;
+        Ok(extract_metadata_info(platform, &data))
+    }
+}
 
-        if let Some(ref downloads) = data.downloads {
-            has_video = downloads.iter().any(|d| {
-                d.media_type == AstraMediaType::Video
-                    && !d.url.contains(".m3u8")
-                    && !d.url.contains("hls_playlist")
-            });
-            has_photo = downloads.iter().any(|d| {
-                d.media_type == AstraMediaType::Image || d.media_type == AstraMediaType::Slide
-            });
-            has_audio = downloads.iter().any(|d| {
-                d.media_type == AstraMediaType::Audio
-                    && d.quality.as_deref() != Some("storyboard")
-                    && !d
-                        .label
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains("mhtml")
-            });
-        }
+pub fn extract_metadata_info(
+    platform: &str,
+    data: &AstraData,
+) -> crate::provider::MediaMetadataInfo {
+    let mut has_video = false;
+    let mut has_photo = false;
+    let mut has_audio = false;
 
-        if let Some(ref photos) = data.photos
-            && !photos.is_empty()
-        {
-            has_photo = true;
-        }
+    if let Some(ref downloads) = data.downloads {
+        has_video = downloads.iter().any(|d| {
+            d.media_type == AstraMediaType::Video
+                && !d.url.contains(".m3u8")
+                && !d.url.contains("hls_playlist")
+        });
+        has_photo = downloads.iter().any(|d| {
+            d.media_type == AstraMediaType::Image || d.media_type == AstraMediaType::Slide
+        });
+        has_audio = downloads.iter().any(|d| {
+            d.media_type == AstraMediaType::Audio
+                && d.quality.as_deref() != Some("storyboard")
+                && !d
+                    .label
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains("mhtml")
+        });
+    }
 
-        if let Some(ref videos) = data.videos
-            && !videos.is_empty()
-        {
-            has_video = true;
-        }
+    if let Some(ref photos) = data.photos
+        && !photos.is_empty()
+    {
+        has_photo = true;
+    }
 
-        // For Twitter/X, if a tweet contains a video, any photo in downloads is just
-        // the video's preview thumbnail — don't flag has_photo so user isn't prompted
-        // with a bogus "Photo" / "Download All" button.
-        if platform == "twitter" && has_video {
-            has_photo = false;
-        }
+    if let Some(ref videos) = data.videos
+        && !videos.is_empty()
+    {
+        has_video = true;
+    }
 
-        Ok(crate::provider::MediaMetadataInfo {
-            has_video,
-            has_photo,
-            has_audio,
-        })
+    if data.result_type.as_deref() == Some("video") {
+        has_video = true;
+    }
+
+    // For Twitter/X, if a tweet contains a video, any photo in downloads is just
+    // the video's preview thumbnail — don't flag has_photo so user isn't prompted
+    // with a bogus "Photo" / "Download All" button.
+    if platform == "twitter" && has_video {
+        has_photo = false;
+    }
+
+    crate::provider::MediaMetadataInfo {
+        has_video,
+        has_photo,
+        has_audio,
     }
 }
 
@@ -507,5 +519,59 @@ mod tests {
             vid("https://cdn/b.mp4", "sd", None),
         ];
         assert_eq!(select_best_videos(&vids).len(), 2);
+    }
+
+    #[test]
+    fn twitter_video_omits_photo_choice_when_thumbnail_in_downloads() {
+        let data = AstraData {
+            result_type: Some("video".to_string()),
+            title: Some("Twitter video test".to_string()),
+            caption: None,
+            thumbnail: Some("https://pbs.twimg.com/amplify_video_thumb/123/img/thumb.jpg".to_string()),
+            downloads: Some(vec![
+                AstraDownloadItem {
+                    label: Some("Photo".to_string()),
+                    url: "https://dl.snapcdn.app/get?token=thumb".to_string(),
+                    media_type: AstraMediaType::Image,
+                    quality: Some("original".to_string()),
+                },
+                AstraDownloadItem {
+                    label: Some("Video 1280p".to_string()),
+                    url: "https://dl.snapcdn.app/get?token=video".to_string(),
+                    media_type: AstraMediaType::Video,
+                    quality: Some("1280p".to_string()),
+                },
+            ]),
+            photos: None,
+            videos: None,
+        };
+
+        let meta = extract_metadata_info("twitter", &data);
+        assert!(meta.has_video);
+        assert!(!meta.has_photo, "thumbnail in downloads must not be counted as photo for twitter video");
+        assert!(!meta.has_audio);
+    }
+
+    #[test]
+    fn twitter_photo_only_preserves_has_photo() {
+        let data = AstraData {
+            result_type: Some("photo".to_string()),
+            title: Some("Twitter photo test".to_string()),
+            caption: None,
+            thumbnail: None,
+            downloads: Some(vec![AstraDownloadItem {
+                label: Some("Photo".to_string()),
+                url: "https://dl.snapcdn.app/get?token=photo1".to_string(),
+                media_type: AstraMediaType::Image,
+                quality: Some("original".to_string()),
+            }]),
+            photos: None,
+            videos: None,
+        };
+
+        let meta = extract_metadata_info("twitter", &data);
+        assert!(!meta.has_video);
+        assert!(meta.has_photo);
+        assert!(!meta.has_audio);
     }
 }
