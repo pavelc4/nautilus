@@ -16,11 +16,26 @@ pub mod progress;
 /// Telegram rejects inline photos over ~10 MB with PHOTO_SAVE_FILE_INVALID;
 /// larger images must be sent as documents.
 const PHOTO_MAX_SIZE: u64 = 10 * 1024 * 1024;
+const PHOTO_MAX_DIM_SUM: i32 = 10_000;
+const PHOTO_MAX_ASPECT_RATIO: f64 = 20.0;
 
-/// Photos over Telegram's inline-photo size ceiling are sent as documents so
-/// they don't fail with PHOTO_SAVE_FILE_INVALID.
-fn send_as_photo(meta: &MediaMeta) -> bool {
-    meta.kind == MediaKind::Photo && meta.size <= PHOTO_MAX_SIZE
+/// Photos over Telegram's inline-photo size ceiling or geometry constraints
+/// (width + height <= 10,000, aspect ratio <= 20:1) are sent as documents so
+/// they don't fail with PHOTO_INVALID_DIMENSIONS or PHOTO_SAVE_FILE_INVALID.
+pub fn send_as_photo(meta: &MediaMeta) -> bool {
+    if meta.kind != MediaKind::Photo || meta.size > PHOTO_MAX_SIZE {
+        return false;
+    }
+    if let Some((w, h)) = meta.dims {
+        if w <= 0 || h <= 0 || (w + h) > PHOTO_MAX_DIM_SUM {
+            return false;
+        }
+        let ratio = w as f64 / h as f64;
+        if ratio > PHOTO_MAX_ASPECT_RATIO || (1.0 / ratio) > PHOTO_MAX_ASPECT_RATIO {
+            return false;
+        }
+    }
+    true
 }
 
 pub async fn upload_media(

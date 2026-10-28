@@ -313,35 +313,28 @@ pub async fn handle_dl(
         caption = metadata;
     }
 
-    let mut uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
-        Vec::with_capacity(total);
-    for (i, item) in items.into_iter().enumerate() {
+    let mut sent_medias = Vec::new();
+    let mut caption_to_send = Some(caption.clone());
+
+    if total == 1 {
+        let item = items.into_iter().next().unwrap();
         let _ = client
             .edit_message(
                 chat,
                 status_id,
-                InputMessage::new().text(if total > 1 {
-                    format!(
-                        "Uploading {}/{}: {} ({} bytes)",
-                        i + 1,
-                        total,
-                        item.meta.filename,
-                        item.meta.size
-                    )
-                } else {
-                    format!(
-                        "Uploading: {} ({} bytes)",
-                        item.meta.filename, item.meta.size
-                    )
-                }),
+                InputMessage::new().text(format!(
+                    "Uploading: {} ({} bytes)",
+                    item.meta.filename, item.meta.size
+                )),
             )
             .await;
 
+        let meta = item.meta.clone();
         let uploaded = match streaming::upload_media(
             client,
             chat,
             status_id,
-            item.meta.clone(),
+            item.meta,
             item.reader,
             &state.config,
         )
@@ -354,23 +347,15 @@ pub async fn handle_dl(
                     .edit_message(
                         chat,
                         status_id,
-                        InputMessage::new().text(format!("Upload {}/{} failed: {e}", i + 1, total)),
+                        InputMessage::new().text(format!("Upload failed: {e}")),
                     )
                     .await;
                 return Err(e);
             }
         };
 
-        uploads.push((uploaded, item.meta));
-    }
-
-    let mut sent_medias = Vec::new();
-    let mut caption_to_send = Some(caption.clone());
-
-    if total == 1 {
-        let (uploaded, meta) = uploads.into_iter().next().unwrap();
         let c = caption_to_send.take().unwrap_or_default();
-        let media_msg = streaming::build_media_message(&c, &meta, uploaded);
+        let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone());
         match client
             .send_message(chat, media_msg.reply_to(reply_to_msg_id))
             .await
@@ -381,154 +366,230 @@ pub async fn handle_dl(
                 }
             }
             Err(e) => {
-                state.bot_stats.record_failure();
+                tracing::warn!("failed to send media as photo/video: {e:#}, retrying as document");
+                let doc_msg = InputMessage::new().html(&c).document(uploaded);
+                match client.send_message(chat, doc_msg.reply_to(reply_to_msg_id)).await {
+                    Ok(msg) => {
+                        if let Some(m) = msg.media() {
+                            sent_medias.push(m);
+                        }
+                    }
+                    Err(e) => {
+                        state.bot_stats.record_failure();
+                        let _ = client
+                            .edit_message(
+                                chat,
+                                status_id,
+                                InputMessage::new().text(format!("Failed to send media: {e}")),
+                            )
+                            .await;
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
+    } else {
+        const ALBUM_MAX: usize = 10;
+        let mut batches: Vec<Vec<crate::provider::MediaItem>> = Vec::new();
+        let mut cur_batch = Vec::new();
+        for item in items {
+            cur_batch.push(item);
+            if cur_batch.len() == ALBUM_MAX {
+                batches.push(std::mem::take(&mut cur_batch));
+            }
+        }
+        if !cur_batch.is_empty() {
+            batches.push(cur_batch);
+        }
+
+        let total_batches = batches.len();
+
+        for (batch_idx, batch) in batches.into_iter().enumerate() {
+            let is_last_batch = batch_idx + 1 == total_batches;
+            let batch_len = batch.len();
+
+            let mut batch_uploads = Vec::with_capacity(batch_len);
+            for (item_idx, item) in batch.into_iter().enumerate() {
                 let _ = client
                     .edit_message(
                         chat,
                         status_id,
-                        InputMessage::new().text(format!("Failed to send media: {e}")),
+                        InputMessage::new().text(format!(
+                            "Batch {}/{}: Uploading media {}/{} ({} bytes)...",
+                            batch_idx + 1,
+                            total_batches,
+                            item_idx + 1,
+                            batch_len,
+                            item.meta.size
+                        )),
                     )
                     .await;
-                return Err(e.into());
+
+                let uploaded = match streaming::upload_media(
+                    client,
+                    chat,
+                    status_id,
+                    item.meta.clone(),
+                    item.reader,
+                    &state.config,
+                )
+                .await
+                {
+                    Ok(u) => u,
+                    Err(e) => {
+                        state.bot_stats.record_failure();
+                        let _ = client
+                            .edit_message(
+                                chat,
+                                status_id,
+                                InputMessage::new().text(format!("Upload failed: {e}")),
+                            )
+                            .await;
+                        return Err(e);
+                    }
+                };
+
+                batch_uploads.push((uploaded, item.meta));
             }
-        }
-    } else {
-        let mut album_uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
-            Vec::new();
-        let mut other_uploads: Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)> =
-            Vec::new();
-        for item in uploads {
-            if item.1.kind == MediaKind::Photo || item.1.kind == MediaKind::Video {
-                album_uploads.push(item);
-            } else {
-                other_uploads.push(item);
-            }
-        }
 
-        const ALBUM_MAX: usize = 10;
-
-        let mut album_batches: Vec<
-            Vec<(grammers_client::media::Uploaded, crate::provider::MediaMeta)>,
-        > = Vec::new();
-        while !album_uploads.is_empty() {
-            let batch_size = if album_uploads.len() == 11 {
-                9
-            } else if album_uploads.len() == 1 {
-                other_uploads.push(album_uploads.remove(0));
-                break;
-            } else {
-                ALBUM_MAX.min(album_uploads.len())
-            };
-            let batch: Vec<_> = album_uploads.drain(..batch_size).collect();
-            album_batches.push(batch);
-        }
-
-        let total_albums = album_batches.len();
-        let total_sends = total_albums + other_uploads.len();
-
-        for (batch_idx, batch) in album_batches.into_iter().enumerate() {
-            let is_last = batch_idx + 1 == total_sends;
             let _ = client
                 .edit_message(
                     chat,
                     status_id,
-                    InputMessage::new().text(format!("Sending album ({} media)...", batch.len())),
+                    InputMessage::new().text(format!(
+                        "Batch {}/{}: Sending to chat...",
+                        batch_idx + 1,
+                        total_batches
+                    )),
                 )
                 .await;
 
-            let mut album_sent = false;
-            let medias: Vec<_> = batch
-                .iter()
-                .enumerate()
-                .map(|(i, (uploaded, meta))| {
-                    let c = if i == 0 && is_last {
-                        caption_to_send.clone().unwrap_or_default()
-                    } else {
-                        String::new()
-                    };
-                    let mut input = streaming::build_media_input(&c, meta, uploaded.clone());
-                    if i == 0 {
-                        input = input.reply_to(reply_to_msg_id);
+            if batch_uploads.len() == 1 {
+                let (uploaded, meta) = batch_uploads.into_iter().next().unwrap();
+                let c = if is_last_batch {
+                    caption_to_send.take().unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone());
+                match client
+                    .send_message(chat, media_msg.reply_to(reply_to_msg_id))
+                    .await
+                {
+                    Ok(msg) => {
+                        if let Some(m) = msg.media() {
+                            sent_medias.push(m);
+                        }
                     }
-                    input
-                })
-                .collect();
-
-            match client.send_album(chat, medias).await {
-                Ok(msgs) => {
-                    album_sent = true;
-                    if is_last {
-                        caption_to_send = None;
-                    }
-                    for msg_opt in msgs {
-                        if let Some(msg) = msg_opt
+                    Err(e) => {
+                        tracing::warn!("single send failed ({e:#}), retrying as document");
+                        let doc_msg = InputMessage::new().html(&c).document(uploaded);
+                        if let Ok(msg) = client
+                            .send_message(chat, doc_msg.reply_to(reply_to_msg_id))
+                            .await
                             && let Some(m) = msg.media()
                         {
                             sent_medias.push(m);
                         }
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("send_album failed: {e:#}, sending individually");
+            } else {
+                let mut album_items = Vec::new();
+                let mut other_items = Vec::new();
+                for item in batch_uploads {
+                    if (item.1.kind == MediaKind::Photo && streaming::send_as_photo(&item.1))
+                        || item.1.kind == MediaKind::Video
+                    {
+                        album_items.push(item);
+                    } else {
+                        other_items.push(item);
+                    }
                 }
-            }
 
-            if !album_sent {
-                for (uploaded, meta) in batch {
-                    let c = if is_last && caption_to_send.is_some() {
+                let mut album_sent = false;
+                if album_items.len() >= 2 {
+                    let medias: Vec<_> = album_items
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (uploaded, meta))| {
+                            let c = if i == 0 && is_last_batch && other_items.is_empty() {
+                                caption_to_send.clone().unwrap_or_default()
+                            } else {
+                                String::new()
+                            };
+                            let mut input = streaming::build_media_input(&c, meta, uploaded.clone());
+                            if i == 0 {
+                                input = input.reply_to(reply_to_msg_id);
+                            }
+                            input
+                        })
+                        .collect();
+
+                    match client.send_album(chat, medias).await {
+                        Ok(msgs) => {
+                            album_sent = true;
+                            if is_last_batch && other_items.is_empty() {
+                                caption_to_send = None;
+                            }
+                            for msg_opt in msgs {
+                                if let Some(msg) = msg_opt
+                                    && let Some(m) = msg.media()
+                                {
+                                    sent_medias.push(m);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("send_album failed: {e:#}, falling back to individual send");
+                        }
+                    }
+                }
+
+                if !album_sent {
+                    for (uploaded, meta) in album_items {
+                        let c = if is_last_batch && caption_to_send.is_some() && other_items.is_empty() {
+                            caption_to_send.take().unwrap_or_default()
+                        } else {
+                            String::new()
+                        };
+                        let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone());
+                        match client
+                            .send_message(chat, media_msg.reply_to(reply_to_msg_id))
+                            .await
+                        {
+                            Ok(msg) => {
+                                if let Some(m) = msg.media() {
+                                    sent_medias.push(m);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("photo fallback failed ({e:#}), sending as document");
+                                let doc_msg = InputMessage::new().html(&c).document(uploaded);
+                                if let Ok(msg) = client
+                                    .send_message(chat, doc_msg.reply_to(reply_to_msg_id))
+                                    .await
+                                    && let Some(m) = msg.media()
+                                {
+                                    sent_medias.push(m);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for (uploaded, _meta) in other_items {
+                    let c = if is_last_batch && caption_to_send.is_some() {
                         caption_to_send.take().unwrap_or_default()
                     } else {
                         String::new()
                     };
-                    let media_msg = streaming::build_media_message(&c, &meta, uploaded);
-                    match client
-                        .send_message(chat, media_msg.reply_to(reply_to_msg_id))
+                    let doc_msg = InputMessage::new().html(&c).document(uploaded);
+                    if let Ok(msg) = client
+                        .send_message(chat, doc_msg.reply_to(reply_to_msg_id))
                         .await
+                        && let Some(m) = msg.media()
                     {
-                        Ok(msg) => {
-                            if let Some(m) = msg.media() {
-                                sent_medias.push(m);
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!("failed to send individual media in fallback: {e:#}");
-                            if !c.is_empty() {
-                                caption_to_send = Some(c);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        for (i, (uploaded, meta)) in other_uploads.into_iter().enumerate() {
-            let is_last = total_albums + i + 1 == total_sends;
-            let _ = client
-                .edit_message(
-                    chat,
-                    status_id,
-                    InputMessage::new().text(format!("Sending: {}", meta.filename)),
-                )
-                .await;
-            let c = if is_last && caption_to_send.is_some() {
-                caption_to_send.take().unwrap_or_default()
-            } else {
-                String::new()
-            };
-            let media_msg = streaming::build_media_message(&c, &meta, uploaded);
-            match client
-                .send_message(chat, media_msg.reply_to(reply_to_msg_id))
-                .await
-            {
-                Ok(msg) => {
-                    if let Some(m) = msg.media() {
                         sent_medias.push(m);
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("failed to send individual other_upload: {e:#}");
-                    if !c.is_empty() {
-                        caption_to_send = Some(c);
                     }
                 }
             }
