@@ -24,6 +24,19 @@ fn test_format_bytes() {
 }
 
 #[test]
+fn test_webp_to_jpeg_conversion() {
+    let webp_bytes = std::fs::read("/tmp/test_ig.webp").expect("read test webp");
+    let img = image::load_from_memory_with_format(&webp_bytes, image::ImageFormat::WebP).expect("decode webp");
+    let mut jpeg_buf = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut jpeg_buf);
+    img.write_to(&mut cursor, image::ImageFormat::Jpeg).expect("encode jpeg");
+    assert!(!jpeg_buf.is_empty());
+    // JPEG magic bytes: 0xFF, 0xD8
+    assert_eq!(jpeg_buf[0], 0xFF);
+    assert_eq!(jpeg_buf[1], 0xD8);
+}
+
+#[test]
 fn test_detect_platform_and_source_link() {
     assert_eq!(detect_platform("https://x.com/user/status/123"), Some("X"));
     assert_eq!(detect_platform("https://pixiv.net/en/artworks/123"), Some("Pixiv"));

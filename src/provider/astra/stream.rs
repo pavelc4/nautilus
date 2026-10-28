@@ -95,21 +95,48 @@ pub async fn download_item(
     url: String,
     mut meta: MediaMeta,
 ) -> anyhow::Result<MediaItem> {
-    let (size, reader, content_type, dims) = fetch_stream(client, &url).await?;
+    let (size, mut reader, content_type, dims) = fetch_stream(client, &url).await?;
     meta.size = size;
     if meta.dims.is_none() {
         meta.dims = dims;
     }
-    // Photos must match the actual on-wire type: a source that returns PNG
-    // (e.g. Pixiv originals) but is labelled image/jpeg makes Telegram reject
-    // the upload with PHOTO_SAVE_FILE_INVALID.
-    if meta.kind == crate::provider::MediaKind::Photo
-        && let Some(ext) = image_ext(content_type.as_deref())
-    {
-        let mime = format!("image/{ext}");
-        meta.mime_type = Cow::Owned(mime);
-        if let Some(dot) = meta.filename.rfind('.') {
-            meta.filename.replace_range(dot.., &format!(".{ext}"));
+
+    if meta.kind == crate::provider::MediaKind::Photo {
+        // Convert WebP images to JPEG so Telegram accepts them as photos
+        // instead of rejecting with PHOTO_EXT_INVALID or sending as stickers.
+        let is_webp = content_type.as_deref() == Some("image/webp")
+            || meta.mime_type == "image/webp"
+            || meta.filename.ends_with(".webp");
+
+        if is_webp {
+            use tokio::io::AsyncReadExt;
+            let mut buf = Vec::with_capacity(meta.size.max(1024) as usize);
+            reader.read_to_end(&mut buf).await?;
+            if let Ok(img) = image::load_from_memory_with_format(&buf, image::ImageFormat::WebP) {
+                let mut jpeg_buf = Vec::new();
+                let mut cursor = std::io::Cursor::new(&mut jpeg_buf);
+                if img.write_to(&mut cursor, image::ImageFormat::Jpeg).is_ok() {
+                    meta.size = jpeg_buf.len() as u64;
+                    meta.mime_type = Cow::Borrowed("image/jpeg");
+                    if let Some(dot) = meta.filename.rfind('.') {
+                        meta.filename.replace_range(dot.., ".jpg");
+                    }
+                    reader = Box::pin(std::io::Cursor::new(jpeg_buf));
+                } else {
+                    reader = Box::pin(std::io::Cursor::new(buf));
+                }
+            } else {
+                reader = Box::pin(std::io::Cursor::new(buf));
+            }
+        } else if let Some(ext) = image_ext(content_type.as_deref()) {
+            // Photos must match the actual on-wire type: a source that returns PNG
+            // (e.g. Pixiv originals) but is labelled image/jpeg makes Telegram reject
+            // the upload with PHOTO_SAVE_FILE_INVALID.
+            let mime = format!("image/{ext}");
+            meta.mime_type = Cow::Owned(mime);
+            if let Some(dot) = meta.filename.rfind('.') {
+                meta.filename.replace_range(dot.., &format!(".{ext}"));
+            }
         }
     }
     Ok(MediaItem { meta, reader })
