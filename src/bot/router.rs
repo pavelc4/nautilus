@@ -285,6 +285,12 @@ async fn handle_message(
                             "Photo",
                             format!("dl:photo:{}", id),
                         ));
+                        if info.photo_count > 1 {
+                            media_row.push(grammers_client::message::Button::data(
+                                "ZIP",
+                                format!("dl:zip:{}", id),
+                            ));
+                        }
                     }
                     if !media_row.is_empty() {
                         buttons.push(media_row);

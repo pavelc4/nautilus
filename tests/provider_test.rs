@@ -131,3 +131,30 @@ fn test_twitter_mixed_preserves_both_video_and_photo() {
     assert!(meta.has_photo, "mixed media tweet must have has_photo = true");
     assert!(!meta.has_audio);
 }
+
+#[test]
+fn test_metadata_photo_count() {
+    let mut items = Vec::new();
+    for i in 0..71 {
+        items.push(AstraDownloadItem {
+            label: Some(format!("Page {}", i + 1)),
+            url: format!("https://cdn/p{}.png", i),
+            media_type: AstraMediaType::Image,
+            quality: Some("original".to_string()),
+            thumbnail: None,
+        });
+    }
+    let data = AstraData {
+        result_type: Some("photo".to_string()),
+        title: Some("Manga 71 pages".to_string()),
+        caption: None,
+        thumbnail: None,
+        downloads: Some(items),
+        photos: None,
+        videos: None,
+    };
+
+    let meta = extract_metadata_info("pixiv", &data);
+    assert!(meta.has_photo);
+    assert_eq!(meta.photo_count, 71);
+}

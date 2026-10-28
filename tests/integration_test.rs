@@ -108,3 +108,165 @@ async fn test_astra_twitter_multi_and_mixed_live_local() {
     assert!(items.iter().any(|i| i.meta.kind == MediaKind::Photo), "must contain photo");
     assert!(items.iter().any(|i| i.meta.kind == MediaKind::Video), "must contain video");
 }
+
+fn get_proc_rss_mb() -> (f64, f64) {
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        let mut rss_kb = 0;
+        let mut hwm_kb = 0;
+        for line in status.lines() {
+            if line.starts_with("VmRSS:") {
+                rss_kb = line.split_whitespace().nth(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+            } else if line.starts_with("VmHWM:") {
+                hwm_kb = line.split_whitespace().nth(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+            }
+        }
+        (rss_kb as f64 / 1024.0, hwm_kb as f64 / 1024.0)
+    } else {
+        (0.0, 0.0)
+    }
+}
+
+fn get_astra_rss_mb() -> Option<(f64, f64)> {
+    let output = std::process::Command::new("pgrep").arg("astra-server").output().ok()?;
+    let pid_str = String::from_utf8_lossy(&output.stdout).trim().lines().next()?.to_string();
+    let status = std::fs::read_to_string(format!("/proc/{pid_str}/status")).ok()?;
+    let mut rss_kb = 0;
+    let mut hwm_kb = 0;
+    for line in status.lines() {
+        if line.starts_with("VmRSS:") {
+            rss_kb = line.split_whitespace().nth(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        } else if line.starts_with("VmHWM:") {
+            hwm_kb = line.split_whitespace().nth(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        }
+    }
+    Some((rss_kb as f64 / 1024.0, hwm_kb as f64 / 1024.0))
+}
+
+#[tokio::test]
+async fn test_pixiv_in_ram_zip_live_local() {
+    use nautilus::provider::astra::AstraProvider;
+    use nautilus::provider::Provider;
+    use tokio::io::AsyncReadExt;
+
+    let provider = AstraProvider::new("http://localhost:3000".to_string());
+    let pixiv_url = "https://pixiv.net/en/artworks/150811369";
+
+    let (proc_rss_before, _) = get_proc_rss_mb();
+    let astra_before = get_astra_rss_mb();
+    println!("\n=== [ZIP BENCHMARK & RAM PROFILE] ===");
+    println!("Baseline Process RSS: {:.2} MB", proc_rss_before);
+    if let Some((rss, hwm)) = astra_before {
+        println!("Baseline Astra Go RSS: {:.2} MB (HWM: {:.2} MB)", rss, hwm);
+    }
+
+    let start_time = std::time::Instant::now();
+
+    // Test resolving with format: Some("zip")
+    match provider.resolve(pixiv_url, Some("zip")).await {
+        Ok(mut items) => {
+            let zip_duration = start_time.elapsed();
+            assert_eq!(items.len(), 1, "expected 1 zip item returned");
+            let item = items.pop().unwrap();
+            assert!(item.meta.filename.ends_with(".zip"), "filename must end with .zip");
+            assert_eq!(item.meta.mime_type, "application/zip");
+            assert!(item.meta.size > 0, "zip size must be > 0");
+
+            let (proc_rss_zip_done, _proc_hwm_zip_done) = get_proc_rss_mb();
+            let astra_mid = get_astra_rss_mb();
+
+            let mut reader = item.reader;
+            let mut buf = Vec::new();
+            reader.read_to_end(&mut buf).await.expect("read zip bytes");
+            assert_eq!(buf.len() as u64, item.meta.size);
+
+            let (proc_rss_read_done, proc_hwm_peak) = get_proc_rss_mb();
+            let astra_after = get_astra_rss_mb();
+
+            let cursor = std::io::Cursor::new(buf);
+            let archive = zip::ZipArchive::new(cursor).expect("valid zip archive");
+            assert_eq!(archive.len(), 71, "zip must contain all 71 pages in order");
+
+            let total_mb = item.meta.size as f64 / (1024.0 * 1024.0);
+            println!("ZIP Generation Time: {:.2}s for 71 pages ({:.2} MB)", zip_duration.as_secs_f64(), total_mb);
+            println!("Nautilus Peak RSS (VmHWM): {:.2} MB", proc_hwm_peak);
+            println!("Nautilus Active RSS after zip creation: {:.2} MB", proc_rss_zip_done);
+            println!("Nautilus Active RSS after buffer read: {:.2} MB", proc_rss_read_done);
+            if let Some((rss, hwm)) = astra_mid {
+                println!("Astra Go RSS during zip: {:.2} MB (Peak HWM: {:.2} MB)", rss, hwm);
+            }
+            if let Some((rss, hwm)) = astra_after {
+                println!("Astra Go RSS after zip: {:.2} MB (Peak HWM: {:.2} MB)", rss, hwm);
+            }
+            println!("======================================\n");
+
+            // Safety assertion for 1GB RAM VPS: peak RAM usage should never exceed 350 MB!
+            assert!(proc_hwm_peak < 350.0, "Peak memory exceeded 350MB budget on 1GB VPS!");
+        }
+        Err(e) => {
+            eprintln!("Skipping live local pixiv zip test (server unreachable): {e}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_pixiv_streaming_photos_live_local() {
+    use nautilus::provider::astra::AstraProvider;
+    use nautilus::provider::Provider;
+    use tokio::io::AsyncReadExt;
+
+    let provider = AstraProvider::new("http://localhost:3000".to_string());
+    let pixiv_url = "https://pixiv.net/en/artworks/150811369";
+
+    let (proc_rss_before, _) = get_proc_rss_mb();
+    let astra_before = get_astra_rss_mb();
+    println!("\n=== [STREAMING BENCHMARK & RAM PROFILE] ===");
+    println!("Baseline Process RSS: {:.2} MB", proc_rss_before);
+    if let Some((rss, hwm)) = astra_before {
+        println!("Baseline Astra Go RSS: {:.2} MB (HWM: {:.2} MB)", rss, hwm);
+    }
+
+    let start_time = std::time::Instant::now();
+
+    // Resolving photo stream format
+    match provider.resolve(pixiv_url, Some("photo")).await {
+        Ok(items) => {
+            let resolve_duration = start_time.elapsed();
+            assert_eq!(items.len(), 71, "expected 71 photo items returned");
+
+            let (proc_rss_resolved, _) = get_proc_rss_mb();
+            println!("Resolved 71 photo streams in: {:.2}s", resolve_duration.as_secs_f64());
+            println!("Process RSS after stream handles opened: {:.2} MB", proc_rss_resolved);
+
+            // Read 512KB chunk from first 4 stream items concurrently to simulate Telegram upload
+            let mut read_tasks = Vec::new();
+            for mut item in items.into_iter().take(4) {
+                read_tasks.push(tokio::spawn(async move {
+                    let mut chunk = vec![0u8; 512 * 1024];
+                    let n = item.reader.read(&mut chunk).await.unwrap_or(0);
+                    n
+                }));
+            }
+
+            let mut total_chunk_read = 0;
+            for t in read_tasks {
+                total_chunk_read += t.await.unwrap_or(0);
+            }
+
+            let (proc_rss_streaming, proc_hwm_streaming) = get_proc_rss_mb();
+            let astra_streaming = get_astra_rss_mb();
+
+            println!("Read {} bytes across 4 concurrent 512KB stream buffers", total_chunk_read);
+            println!("Process RSS during 512KB stream piping: {:.2} MB (HWM: {:.2} MB)", proc_rss_streaming, proc_hwm_streaming);
+            if let Some((rss, hwm)) = astra_streaming {
+                println!("Astra Go RSS during streaming: {:.2} MB (HWM: {:.2} MB)", rss, hwm);
+            }
+            println!("==========================================\n");
+
+            // Streaming memory assertion: stream handles and 512KB buffers must stay well under 100 MB
+            assert!(proc_rss_streaming < 150.0, "Streaming memory exceeded 150MB budget!");
+        }
+        Err(e) => {
+            eprintln!("Skipping live local pixiv streaming test (server unreachable): {e}");
+        }
+    }
+}

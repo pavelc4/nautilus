@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::provider::{MediaItem, MediaKind, MediaMeta, Provider};
+use crate::provider::{MediaItem, MediaKind, MediaMeta, MediaReader, Provider};
 
 pub mod client;
 pub mod endpoint;
@@ -95,6 +95,7 @@ impl Provider for AstraProvider {
             || format == Some("both")
             || format == Some("all");
         let wants_photo = (format == Some("photo")
+            || format == Some("zip")
             || format.is_none()
             || format == Some("both")
             || format == Some("all"))
@@ -262,21 +263,87 @@ impl Provider for AstraProvider {
                 }
             }
 
-            if wants_photo {
+            if format == Some("zip") {
                 let slideshow_items: Vec<_> = downloads
                     .iter()
                     .filter(|d| {
                         d.media_type == AstraMediaType::Image
                             || d.media_type == AstraMediaType::Slide
                     })
+                    .cloned()
                     .collect();
-                for (idx, item) in slideshow_items.into_iter().enumerate() {
-                    let sanitized = sanitize_filename(title.as_deref().unwrap_or("image"), "image");
-                    let filename = format!("{sanitized}_{idx}.jpg");
+
+                if !slideshow_items.is_empty() {
+                    use futures::stream::{self, StreamExt};
+                    use std::io::Write;
+                    use zip::write::SimpleFileOptions;
+                    use zip::CompressionMethod;
+
+                    let total_pages = slideshow_items.len();
+                    // Pre-allocate buffer in RAM: ~2MB per page (bounded up to 250MB for safety on 1GB RAM)
+                    let estimated_bytes = (total_pages * 2 * 1024 * 1024).min(250 * 1024 * 1024);
+                    let zip_buf = std::io::Cursor::new(Vec::with_capacity(estimated_bytes));
+                    let mut zip_writer = zip::ZipWriter::new(zip_buf);
+                    let zip_options = SimpleFileOptions::default()
+                        .compression_method(CompressionMethod::Stored); // 0% CPU, pure memory copy!
+
+                    let concurrency = 4; // Sweet spot for 1c/2t/1GB RAM
+                    let client = self.client.clone();
+
+                    let mut fetch_stream = stream::iter(slideshow_items.into_iter().enumerate())
+                        .map(|(idx, item)| {
+                            let client = client.clone();
+                            async move {
+                                let mut attempts = 0;
+                                loop {
+                                    attempts += 1;
+                                    let resp = client.get(&item.url).send().await;
+                                    match resp {
+                                        Ok(r) if r.status().is_success() => {
+                                            let ctype = r
+                                                .headers()
+                                                .get("content-type")
+                                                .and_then(|v| v.to_str().ok())
+                                                .map(String::from);
+                                            if let Ok(bytes) = r.bytes().await {
+                                                return (idx, Some(bytes), ctype);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                    if attempts >= 3 {
+                                        tracing::warn!(page = idx, "failed to download page after 3 attempts");
+                                        return (idx, None, None);
+                                    }
+                                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempts)).await;
+                                }
+                            }
+                        })
+                        .buffered(concurrency);
+
+                    while let Some((idx, bytes_opt, ctype)) = fetch_stream.next().await {
+                        if let Some(bytes) = bytes_opt {
+                            let ext = image_ext(ctype.as_deref()).unwrap_or("jpg");
+                            let entry_name = format!("{:03}_p{}.{}", idx + 1, idx, ext);
+                            if let Err(e) = zip_writer.start_file(&entry_name, zip_options) {
+                                tracing::warn!("failed to start zip entry {}: {}", entry_name, e);
+                                continue;
+                            }
+                            let _ = zip_writer.write_all(&bytes);
+                        }
+                    }
+
+                    let mut cursor = zip_writer.finish()?;
+                    let total_size = cursor.get_ref().len() as u64;
+                    cursor.set_position(0);
+                    let sanitized =
+                        sanitize_filename(title.as_deref().unwrap_or("gallery"), "gallery");
+                    let filename = format!("{sanitized}.zip");
+
                     let meta = MediaMeta {
                         filename,
-                        mime_type: "image/jpeg".into(),
-                        size: 0,
+                        mime_type: "application/zip".into(),
+                        size: total_size,
                         duration_secs: None,
                         dims: None,
                         kind: MediaKind::Photo,
@@ -284,11 +351,58 @@ impl Provider for AstraProvider {
                         description: description.clone(),
                         thumbnail_url: None,
                     };
-                    // Skip a photo whose CDN fetch fails (403 on a stale/oversized
-                    // variant) rather than aborting the whole slideshow.
-                    match download_item(&self.client, item.url.clone(), meta).await {
-                        Ok(media_item) => items.push(media_item),
-                        Err(e) => tracing::warn!(idx, error = %e, "skipping slideshow photo: CDN fetch failed"),
+
+                    let reader: MediaReader = Box::pin(cursor);
+                    return Ok(vec![MediaItem { meta, reader }]);
+                }
+            } else if wants_photo {
+                let slideshow_items: Vec<_> = downloads
+                    .iter()
+                    .filter(|d| {
+                        d.media_type == AstraMediaType::Image
+                            || d.media_type == AstraMediaType::Slide
+                    })
+                    .cloned()
+                    .collect();
+
+                let concurrency = 4; // 4 concurrent workers (tuned for 1c/2t/1GB RAM)
+                let client = self.client.clone();
+
+                use futures::stream::{self, StreamExt};
+                let mut fetch_stream = stream::iter(slideshow_items.into_iter().enumerate())
+                    .map(|(idx, item)| {
+                        let client = client.clone();
+                        let title = title.clone();
+                        let description = description.clone();
+                        async move {
+                            let sanitized =
+                                sanitize_filename(title.as_deref().unwrap_or("image"), "image");
+                            let filename = format!("{sanitized}_{idx}.jpg");
+                            let meta = MediaMeta {
+                                filename,
+                                mime_type: "image/jpeg".into(),
+                                size: 0,
+                                duration_secs: None,
+                                dims: None,
+                                kind: MediaKind::Photo,
+                                title,
+                                description,
+                                thumbnail_url: None,
+                            };
+                            match download_item(&client, item.url, meta).await {
+                                Ok(media_item) => Some(media_item),
+                                Err(e) => {
+                                    tracing::warn!(idx, error = %e, "skipping slideshow photo: CDN fetch failed");
+                                    None
+                                }
+                            }
+                        }
+                    })
+                    .buffered(concurrency);
+
+                while let Some(item_opt) = fetch_stream.next().await {
+                    if let Some(media_item) = item_opt {
+                        items.push(media_item);
                     }
                 }
             }
@@ -437,6 +551,7 @@ pub fn extract_metadata_info(
     let mut has_video = false;
     let mut has_photo = false;
     let mut has_audio = false;
+    let mut photo_count = 0;
 
     if let Some(ref downloads) = data.downloads {
         has_video = downloads.iter().any(|d| {
@@ -444,9 +559,16 @@ pub fn extract_metadata_info(
                 && !d.url.contains(".m3u8")
                 && !d.url.contains("hls_playlist")
         });
-        has_photo = downloads.iter().any(|d| {
-            d.media_type == AstraMediaType::Image || d.media_type == AstraMediaType::Slide
-        });
+        let img_count = downloads
+            .iter()
+            .filter(|d| {
+                d.media_type == AstraMediaType::Image || d.media_type == AstraMediaType::Slide
+            })
+            .count();
+        if img_count > 0 {
+            has_photo = true;
+            photo_count += img_count;
+        }
         has_audio = downloads.iter().any(|d| {
             d.media_type == AstraMediaType::Audio
                 && d.quality.as_deref() != Some("storyboard")
@@ -463,6 +585,7 @@ pub fn extract_metadata_info(
         && !photos.is_empty()
     {
         has_photo = true;
+        photo_count += photos.len();
     }
 
     if let Some(ref videos) = data.videos
@@ -480,12 +603,18 @@ pub fn extract_metadata_info(
     // with a bogus "Photo" / "Download All" button, unless the tweet has multiple/mixed media.
     if platform == "twitter" && has_video && data.result_type.as_deref() != Some("multiple") {
         has_photo = false;
+        photo_count = 0;
+    }
+
+    if has_photo && photo_count == 0 {
+        photo_count = 1;
     }
 
     crate::provider::MediaMetadataInfo {
         has_video,
         has_photo,
         has_audio,
+        photo_count,
     }
 }
 

@@ -313,7 +313,7 @@ pub fn detect_image_dimensions(data: &[u8]) -> Option<(i32, i32)> {
     None
 }
 
-fn image_ext(content_type: Option<&str>) -> Option<&'static str> {
+pub fn image_ext(content_type: Option<&str>) -> Option<&'static str> {
     match content_type {
         Some("image/png") => Some("png"),
         Some("image/jpeg") | Some("image/jpg") => Some("jpg"),

@@ -37,6 +37,7 @@ pub struct MediaMetadataInfo {
     pub has_video: bool,
     pub has_audio: bool,
     pub has_photo: bool,
+    pub photo_count: usize,
 }
 
 pub struct MediaItem {

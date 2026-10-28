@@ -23,7 +23,11 @@ const PHOTO_MAX_ASPECT_RATIO: f64 = 20.0;
 /// (width + height <= 10,000, aspect ratio <= 20:1) are sent as documents so
 /// they don't fail with PHOTO_INVALID_DIMENSIONS or PHOTO_SAVE_FILE_INVALID.
 pub fn send_as_photo(meta: &MediaMeta) -> bool {
-    if meta.kind != MediaKind::Photo || meta.size > PHOTO_MAX_SIZE {
+    if meta.kind != MediaKind::Photo
+        || meta.size > PHOTO_MAX_SIZE
+        || !meta.mime_type.starts_with("image/")
+        || meta.filename.ends_with(".zip")
+    {
         return false;
     }
     if let Some((w, h)) = meta.dims {

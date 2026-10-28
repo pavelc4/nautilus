@@ -395,10 +395,14 @@ pub async fn handle_dl(
     }
     let quote_content = quote_content.trim();
 
-    let type_str = match kind {
-        MediaKind::Video => "Video",
-        MediaKind::Photo => "Photo",
-        MediaKind::Audio => "Audio",
+    let type_str = if items[0].meta.filename.ends_with(".zip") {
+        "ZIP Archive"
+    } else {
+        match kind {
+            MediaKind::Video => "Video",
+            MediaKind::Photo => "Photo",
+            MediaKind::Audio => "Audio",
+        }
     };
 
     let total_size: u64 = items.iter().map(|item| item.meta.size).sum();
@@ -531,23 +535,21 @@ pub async fn handle_dl(
             let is_last_batch = batch_idx + 1 == total_batches;
             let batch_len = batch.len();
 
-            let mut batch_uploads = Vec::with_capacity(batch_len);
-            for (item_idx, item) in batch.into_iter().enumerate() {
-                let _ = client
-                    .edit_message(
-                        chat,
-                        status_id,
-                        InputMessage::new().text(format!(
-                            "Batch {}/{}: Uploading media {}/{} ({} bytes)...",
-                            batch_idx + 1,
-                            total_batches,
-                            item_idx + 1,
-                            batch_len,
-                            item.meta.size
-                        )),
-                    )
-                    .await;
+            let _ = client
+                .edit_message(
+                    chat,
+                    status_id,
+                    InputMessage::new().text(format!(
+                        "Uploading batch {}/{} ({} items)...",
+                        batch_idx + 1,
+                        total_batches,
+                        batch_len
+                    )),
+                )
+                .await;
 
+            let mut batch_uploads = Vec::with_capacity(batch_len);
+            for item in batch {
                 let (uploaded, thumb) = match streaming::upload_media(
                     client,
                     chat,
