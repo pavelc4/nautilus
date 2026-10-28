@@ -55,7 +55,7 @@ fn test_build_media_caption() {
     assert!(caption.contains("📎 <b>Source:</b> <a href=\"https://pixiv.net/en/artworks/123\">Pixiv</a>"));
     assert!(caption.contains("📄 <b>Type:</b> ZIP Archive"));
     assert!(caption.contains("📁 <b>Size:</b> 5.00 MB"));
-    assert!(caption.contains("⏱ <b>Process Time:</b> 1.20s (<code>cached</code>)"));
+    assert!(caption.contains("⏱ <b>Process Time:</b> 1.20s <code>cached</code>"));
     assert!(caption.contains("🔑 <b>Hash:</b> <code>7a8f9c0e1b2d3e4f</code>"));
     assert!(caption.contains("👤 <b>By:</b> <a href=\"https://t.me/Alice\">Alice</a>"));
     assert!(caption.contains("🤖 Downloaded via @aetherstagingbot"));

@@ -94,7 +94,7 @@ pub fn build_media_caption(opts: CaptionOptions<'_>) -> String {
 
     let elapsed_str = format_duration(opts.elapsed);
     if let Some(label) = opts.cache_label {
-        metadata.push_str(&format!("⏱ <b>Process Time:</b> {elapsed_str} (<code>{label}</code>)\n"));
+        metadata.push_str(&format!("⏱ <b>Process Time:</b> {elapsed_str} <code>{label}</code>\n"));
     } else {
         metadata.push_str(&format!("⏱ <b>Process Time:</b> {elapsed_str}\n"));
     }
