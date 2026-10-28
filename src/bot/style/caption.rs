@@ -108,14 +108,14 @@ pub fn build_media_caption(opts: CaptionOptions<'_>) -> CaptionResult {
     if let Some(hash) = opts.media_hash {
         let short_hash = if hash.len() >= 16 { &hash[..16] } else { hash };
         metadata.push_str(&format!("🔑 <b>Hash:</b> <code>{short_hash}</code>\n"));
+        if let Some(bot) = opts.bot_username.filter(|b| !b.is_empty()) {
+            let bot = bot.trim_start_matches('@');
+            metadata.push_str(&format!("🤖 Downloaded via @{bot}\n"));
+        }
     }
 
     if let Some(name) = opts.sender_name {
         metadata.push_str(&format!("👤 <b>By:</b> {name}\n"));
-    }
-    if let Some(bot) = opts.bot_username.filter(|b| !b.is_empty()) {
-        let bot = bot.trim_start_matches('@');
-        metadata.push_str(&format!("🤖 Downloaded via @{bot}\n"));
     }
 
     metadata.push_str("\n💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>");

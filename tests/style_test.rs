@@ -34,19 +34,19 @@ fn test_detect_platform_and_source_link() {
 }
 
 #[test]
-fn test_build_media_caption() {
+fn test_build_media_caption_user() {
     let res = build_media_caption(CaptionOptions {
         title: Some("My Art & Title"),
         description: Some("Artwork description"),
         source_url: "https://pixiv.net/en/artworks/123",
-        type_str: "ZIP Archive",
+        type_str: "Photo",
         resolution: None,
-        total_bytes: 5 * 1024 * 1024,
+        total_bytes: 15 * 1024 * 1024 + 260 * 1024,
         duration: None,
-        elapsed: Duration::from_millis(1200),
-        cache_label: Some("cached"),
-        media_hash: Some("7a8f9c0e1b2d3e4f5a6b7c8d9e0f1a2b"),
-        sender_name: Some("<a href=\"https://t.me/Alice\">Alice</a>"),
+        elapsed: Duration::from_millis(5820),
+        cache_label: None,
+        media_hash: None,
+        sender_name: Some("<a href=\"https://t.me/Pavellc\">Pavellc</a>"),
         bot_username: Some("aetherstagingbot"),
     });
 
@@ -55,12 +55,36 @@ fn test_build_media_caption() {
     assert!(caption.contains("<b>My Art &amp; Title</b>"));
     assert!(caption.contains("<blockquote>"));
     assert!(caption.contains("📎 <b>Source:</b> <a href=\"https://pixiv.net/en/artworks/123\">Pixiv</a>"));
-    assert!(caption.contains("📄 <b>Type:</b> ZIP Archive"));
-    assert!(caption.contains("📁 <b>Size:</b> 5.00 MB"));
-    assert!(caption.contains("⏱ <b>Process Time:</b> 1.20s <code>cached</code>"));
+    assert!(caption.contains("📄 <b>Type:</b> Photo"));
+    assert!(caption.contains("📁 <b>Size:</b> 15.25 MB"));
+    assert!(caption.contains("⏱ <b>Process Time:</b> 5.82s"));
+    assert!(caption.contains("👤 <b>By:</b> <a href=\"https://t.me/Pavellc\">Pavellc</a>"));
+    assert!(!caption.contains("🤖 Downloaded via"));
+    assert!(!caption.contains("🔑 <b>Hash:</b>"));
+    assert!(caption.contains("💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>"));
+}
+
+#[test]
+fn test_build_media_caption_dump() {
+    let res = build_media_caption(CaptionOptions {
+        title: Some("Dump File"),
+        description: None,
+        source_url: "https://x.com/user/status/123",
+        type_str: "Video",
+        resolution: Some((1920, 1080)),
+        total_bytes: 50 * 1024 * 1024,
+        duration: Some(Duration::from_secs(30)),
+        elapsed: Duration::from_secs(3),
+        cache_label: None,
+        media_hash: Some("7a8f9c0e1b2d3e4f5a6b7c8d9e0f1a2b"),
+        sender_name: None,
+        bot_username: Some("aetherstagingbot"),
+    });
+
+    let caption = res.caption;
     assert!(caption.contains("🔑 <b>Hash:</b> <code>7a8f9c0e1b2d3e4f</code>"));
-    assert!(caption.contains("👤 <b>By:</b> <a href=\"https://t.me/Alice\">Alice</a>"));
     assert!(caption.contains("🤖 Downloaded via @aetherstagingbot"));
+    assert!(!caption.contains("👤 <b>By:</b>"));
     assert!(caption.contains("💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>"));
 }
 
