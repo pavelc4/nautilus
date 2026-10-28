@@ -78,6 +78,150 @@ impl Drop for JobGuard {
     }
 }
 
+struct CachedMediaContext<'a> {
+    chat: PeerRef,
+    status_id: i32,
+    reply_to_msg_id: Option<i32>,
+    url: &'a str,
+    cached: &'a crate::app::CachedMedia,
+    sender_name: Option<&'a str>,
+    start_time: std::time::Instant,
+    is_coalesced: bool,
+}
+
+async fn send_cached_media(
+    client: &Client,
+    ctx: CachedMediaContext<'_>,
+    state: &Arc<AppState>,
+) -> anyhow::Result<()> {
+    let CachedMediaContext {
+        chat,
+        status_id,
+        reply_to_msg_id,
+        url,
+        cached,
+        sender_name,
+        start_time,
+        is_coalesced,
+    } = ctx;
+    tracing::info!(url, is_coalesced, "cache hit at bot level, sending cached media");
+    state.bot_stats.record_cache_hit();
+    let _ = client
+        .edit_message(
+            chat,
+            status_id,
+            InputMessage::new().text("Sending cached media..."),
+        )
+        .await;
+
+    let mut quote_content = String::new();
+    if let Some(ref t) = cached.title {
+        let escaped_t = html_escape(t);
+        quote_content.push_str(&format!("<b>{escaped_t}</b>\n"));
+    }
+    if let Some(ref desc) = cached.description {
+        let escaped_desc = html_escape(desc);
+        quote_content.push_str(&escaped_desc);
+    }
+    let quote_content = quote_content.trim();
+
+    let type_str = match cached.kind {
+        MediaKind::Video => "Video",
+        MediaKind::Photo => "Photo",
+        MediaKind::Audio => "Audio",
+    };
+
+    let total_size: u64 = cached
+        .medias
+        .iter()
+        .map(|m| m.size().unwrap_or(0) as u64)
+        .sum();
+    let size_mb = (total_size as f64) / (1024.0 * 1024.0);
+
+    let mut metadata = String::new();
+    metadata.push_str(&format!("🔗 Source: {}\n", get_source_link(url)));
+    metadata.push_str(&format!("🏷 Type: {type_str}\n"));
+    if cached.kind == MediaKind::Video {
+        let mut dims = None;
+        for m in &cached.medias {
+            if let grammers_client::media::Media::Document(doc) = m
+                && let Some(res) = doc.resolution()
+            {
+                dims = Some(res);
+                break;
+            }
+        }
+        if let Some((w, h)) = dims {
+            metadata.push_str(&format!("📺 Resolution: {w}x{h}\n"));
+        }
+    }
+    metadata.push_str(&format!("💾 Size: {:.2} MB\n", size_mb));
+    let elapsed_str = format_process_duration(start_time.elapsed());
+    let cache_label = if is_coalesced { "coalesced" } else { "cached" };
+    metadata.push_str(&format!("⏱️ Process Time: {elapsed_str} ({cache_label})\n"));
+    if let Some(name) = sender_name {
+        metadata.push_str(&format!("👤 By: {name}\n"));
+    }
+    metadata.push_str(
+        "\n💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>",
+    );
+
+    let caption;
+    let mut separate_text = None;
+
+    if !quote_content.is_empty() {
+        let blockquote = format!("<blockquote>{quote_content}</blockquote>\n\n");
+        if blockquote.chars().count() + metadata.chars().count() > 1000 {
+            caption = metadata;
+            separate_text = Some(blockquote);
+        } else {
+            caption = format!("{}{}", blockquote, metadata);
+        }
+    } else {
+        caption = metadata;
+    }
+
+    let mut sent_any = false;
+    if cached.medias.len() == 1 {
+        let media = &cached.medias[0];
+        if let Some(im) = media.to_raw_input_media() {
+            let msg = InputMessage::new()
+                .html(caption)
+                .media(im)
+                .reply_to(reply_to_msg_id);
+            if client.send_message(chat, msg).await.is_ok() {
+                sent_any = true;
+            }
+        }
+    } else {
+        let mut album_medias = Vec::new();
+        for (idx, media) in cached.medias.iter().enumerate() {
+            let mut input_media =
+                grammers_client::media::InputMedia::new().copy_media(media);
+            if idx == 0 {
+                input_media = input_media.html(&caption).reply_to(reply_to_msg_id);
+            }
+            album_medias.push(input_media);
+        }
+        if client.send_album(chat, album_medias).await.is_ok() {
+            sent_any = true;
+        }
+    }
+
+    if sent_any && let Some(ref sep) = separate_text {
+        let _ = client
+            .send_message(
+                chat,
+                InputMessage::new().html(sep).reply_to(reply_to_msg_id),
+            )
+            .await;
+    }
+
+    let _ = client.delete_messages(chat, &[status_id]).await;
+    state.bot_stats.record_success();
+    Ok(())
+}
+
 pub async fn handle_dl(
     client: &Client,
     chat: PeerRef,
@@ -105,126 +249,57 @@ pub async fn handle_dl(
         .await?;
     let status_id = status_msg.id();
 
+    // 1. Direct cache hit
     if let Some(cached) = state.media_cache.get(&cache_key) {
         let cached = cached.value();
         if !cached.medias.is_empty() {
-            tracing::info!(url, "cache hit at bot level, sending cached media");
-            state.bot_stats.record_cache_hit();
-            let _ = client
-                .edit_message(
+            return send_cached_media(
+                client,
+                CachedMediaContext {
                     chat,
                     status_id,
-                    InputMessage::new().text("Sending cached media..."),
-                )
-                .await;
-
-            let mut quote_content = String::new();
-            if let Some(ref t) = cached.title {
-                let escaped_t = html_escape(t);
-                quote_content.push_str(&format!("<b>{escaped_t}</b>\n"));
-            }
-            if let Some(ref desc) = cached.description {
-                let escaped_desc = html_escape(desc);
-                quote_content.push_str(&escaped_desc);
-            }
-            let quote_content = quote_content.trim();
-
-            let type_str = match cached.kind {
-                MediaKind::Video => "Video",
-                MediaKind::Photo => "Photo",
-                MediaKind::Audio => "Audio",
-            };
-
-            let total_size: u64 = cached
-                .medias
-                .iter()
-                .map(|m| m.size().unwrap_or(0) as u64)
-                .sum();
-            let size_mb = (total_size as f64) / (1024.0 * 1024.0);
-
-            let mut metadata = String::new();
-            metadata.push_str(&format!("🔗 Source: {}\n", get_source_link(&url)));
-            metadata.push_str(&format!("🏷 Type: {type_str}\n"));
-            if cached.kind == MediaKind::Video {
-                let mut dims = None;
-                for m in &cached.medias {
-                    if let grammers_client::media::Media::Document(doc) = m
-                        && let Some(res) = doc.resolution()
-                    {
-                        dims = Some(res);
-                        break;
-                    }
-                }
-                if let Some((w, h)) = dims {
-                    metadata.push_str(&format!("📺 Resolution: {w}x{h}\n"));
-                }
-            }
-            metadata.push_str(&format!("💾 Size: {:.2} MB\n", size_mb));
-            let elapsed_str = format_process_duration(start_time.elapsed());
-            metadata.push_str(&format!("⏱️ Process Time: {elapsed_str} (cached)\n"));
-            if let Some(ref name) = sender_name {
-                metadata.push_str(&format!("👤 By: {name}\n"));
-            }
-            metadata.push_str(
-                "\n💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>",
-            );
-
-            let caption;
-            let mut separate_text = None;
-
-            if !quote_content.is_empty() {
-                let blockquote = format!("<blockquote>{quote_content}</blockquote>\n\n");
-                if blockquote.chars().count() + metadata.chars().count() > 1000 {
-                    caption = metadata;
-                    separate_text = Some(blockquote);
-                } else {
-                    caption = format!("{}{}", blockquote, metadata);
-                }
-            } else {
-                caption = metadata;
-            }
-
-            let mut sent_any = false;
-            if cached.medias.len() == 1 {
-                let media = &cached.medias[0];
-                if let Some(im) = media.to_raw_input_media() {
-                    let msg = InputMessage::new()
-                        .html(caption)
-                        .media(im)
-                        .reply_to(reply_to_msg_id);
-                    if client.send_message(chat, msg).await.is_ok() {
-                        sent_any = true;
-                    }
-                }
-            } else {
-                let mut album_medias = Vec::new();
-                for (idx, media) in cached.medias.iter().enumerate() {
-                    let mut input_media =
-                        grammers_client::media::InputMedia::new().copy_media(media);
-                    if idx == 0 {
-                        input_media = input_media.html(&caption).reply_to(reply_to_msg_id);
-                    }
-                    album_medias.push(input_media);
-                }
-                if client.send_album(chat, album_medias).await.is_ok() {
-                    sent_any = true;
-                }
-            }
-
-            if sent_any && let Some(ref sep) = separate_text {
-                let _ = client
-                    .send_message(
-                        chat,
-                        InputMessage::new().html(sep).reply_to(reply_to_msg_id),
-                    )
-                    .await;
-            }
-
-            let _ = client.delete_messages(chat, &[status_id]).await;
-            state.bot_stats.record_success();
-            return Ok(());
+                    reply_to_msg_id,
+                    url: &url,
+                    cached,
+                    sender_name: sender_name.as_deref(),
+                    start_time,
+                    is_coalesced: false,
+                },
+                state,
+            )
+            .await;
         }
     }
+
+    // 2. In-flight request deduplication: if identical URL is currently downloading, wait for it
+    let flight_leader = match state.singleflight.wait_or_lead(&cache_key).await {
+        Ok(crate::pool::FlightStatus::Leader(leader)) => Some(leader),
+        Ok(crate::pool::FlightStatus::Follower(())) => {
+            // Concurrent leader finished and populated media_cache!
+            if let Some(cached) = state.media_cache.get(&cache_key) {
+                let cached = cached.value();
+                if !cached.medias.is_empty() {
+                    return send_cached_media(
+                        client,
+                        CachedMediaContext {
+                            chat,
+                            status_id,
+                            reply_to_msg_id,
+                            url: &url,
+                            cached,
+                            sender_name: sender_name.as_deref(),
+                            start_time,
+                            is_coalesced: true,
+                        },
+                        state,
+                    )
+                    .await;
+                }
+            }
+            None
+        }
+        Err(_) => None,
+    };
 
     // Acquire worker slot before heavy downstream network operations
     let client_for_queue = client.clone();
@@ -688,6 +763,10 @@ pub async fn handle_dl(
             kind,
         },
     );
+
+    if let Some(leader) = flight_leader {
+        leader.complete(());
+    }
 
     let _ = client.delete_messages(chat, &[status_id]).await;
     state.bot_stats.record_success();

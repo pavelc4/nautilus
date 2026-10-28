@@ -22,6 +22,7 @@ pub struct AppState {
     pub registry: Arc<ProviderRegistry>,
     pub bot_stats: BotStats,
     pub worker_pool: Arc<crate::pool::WorkerPool>,
+    pub singleflight: Arc<crate::pool::SingleFlight<()>>,
     pub pending_downloads: Arc<dashmap::DashMap<String, String>>,
     pub media_cache: Arc<dashmap::DashMap<String, CachedMedia>>,
     /// Shared HTTP client for lightweight diagnostic calls (/check, /status, /speedtest).
@@ -72,6 +73,7 @@ impl AppState {
             registry,
             bot_stats,
             worker_pool,
+            singleflight: Arc::new(crate::pool::SingleFlight::new()),
             pending_downloads: Arc::new(dashmap::DashMap::new()),
             media_cache: Arc::new(dashmap::DashMap::new()),
             http,
