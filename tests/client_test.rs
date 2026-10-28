@@ -46,3 +46,32 @@ fn test_parse_dimensions_and_quality() {
     assert_eq!(parse_quality("HD", ""), 1080);
     assert_eq!(sanitize_filename("test/file?name", "default"), "test_file_name");
 }
+
+#[tokio::test]
+async fn test_zero_size_stream_spooling_concept() {
+    let temp_dir = std::env::temp_dir();
+    let temp_path = temp_dir.join(format!("test_spool_{}.tmp", rand::random::<u64>()));
+
+    let mut file = tokio::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&temp_path)
+        .await
+        .unwrap();
+
+    let sample_payload = b"Sample streamed payload when size is unknown";
+    tokio::io::AsyncWriteExt::write_all(&mut file, sample_payload).await.unwrap();
+    tokio::io::AsyncWriteExt::flush(&mut file).await.unwrap();
+
+    let size = file.metadata().await.unwrap().len();
+    assert_eq!(size, sample_payload.len() as u64);
+
+    tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(0)).await.unwrap();
+    let _ = tokio::fs::remove_file(&temp_path).await;
+
+    let mut read_back = Vec::new();
+    tokio::io::AsyncReadExt::read_to_end(&mut file, &mut read_back).await.unwrap();
+    assert_eq!(read_back, sample_payload);
+}

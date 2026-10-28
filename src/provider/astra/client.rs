@@ -85,15 +85,41 @@ pub async fn fetch_stream(
     let dims = detect_image_dimensions(&peek_buf);
 
     if size == 0 {
-        // its size (Telegram needs total parts up front). Fine for small clips,
-        // a memory bomb for a 2 GB video. Upgrade path: HEAD/Range preflight for
-        // size, or spill to a temp file, so memory stays flat. See streaming notes.
-        let mut buffer = peek_buf;
+        // Upstream omitted Content-Length. Spill to an unlinked temporary disk file so RAM
+        // usage stays flat O(1) instead of blowing up memory for multi-gigabyte media.
+        let temp_dir = std::env::temp_dir();
+        let temp_filename = format!(
+            "nautilus_stream_{}_{}.tmp",
+            std::process::id(),
+            rand::random::<u64>()
+        );
+        let temp_path = temp_dir.join(temp_filename);
+
+        let mut file = tokio::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&temp_path)
+            .await?;
+
+        // Write peek_buf first
+        tokio::io::AsyncWriteExt::write_all(&mut file, &peek_buf).await?;
+
+        // Copy remaining stream chunks to file
         let mut buf_reader = tokio::io::BufReader::with_capacity(STREAM_BUF_BYTES, stream_reader);
-        buf_reader.read_to_end(&mut buffer).await?;
-        size = buffer.len() as u64;
-        let cursor = std::io::Cursor::new(buffer);
-        let reader: MediaReader = Box::pin(cursor);
+        tokio::io::copy(&mut buf_reader, &mut file).await?;
+
+        // Sync and rewind
+        tokio::io::AsyncWriteExt::flush(&mut file).await?;
+        size = file.metadata().await?.len();
+        tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(0)).await?;
+
+        // Unlink on disk; open file handle remains valid on Linux until dropped
+        let _ = tokio::fs::remove_file(&temp_path).await;
+
+        let buffered = tokio::io::BufReader::with_capacity(STREAM_BUF_BYTES, file);
+        let reader: MediaReader = Box::pin(buffered);
         Ok((size, reader, content_type, dims))
     } else {
         let cursor = std::io::Cursor::new(peek_buf);
