@@ -9,7 +9,7 @@ use crate::app::AppState;
 use crate::provider::MediaKind;
 use crate::streaming;
 
-fn normalize_url(url: &str) -> String {
+pub fn normalize_url(url: &str) -> String {
     let parsed = match url::Url::parse(url) {
         Ok(u) => u,
         Err(_) => return url.to_string(),
@@ -46,7 +46,7 @@ fn normalize_url(url: &str) -> String {
     clean.as_str().to_string()
 }
 
-fn format_process_duration(dur: Duration) -> String {
+pub fn format_process_duration(dur: Duration) -> String {
     let secs = dur.as_secs_f64();
     if secs < 1.0 {
         format!("{:.0} ms", dur.as_millis())
@@ -737,25 +737,4 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_format_process_duration() {
-        assert_eq!(format_process_duration(Duration::from_millis(350)), "350 ms");
-        assert_eq!(format_process_duration(Duration::from_millis(1850)), "1.85s");
-        assert_eq!(format_process_duration(Duration::from_secs(65)), "1m 5s");
-    }
-
-    #[test]
-    fn test_normalize_url_strips_tracking() {
-        let u = "https://x.com/user/status/123?utm_source=twitter&a=1&igshid=abc";
-        let norm = normalize_url(u);
-        assert!(!norm.contains("utm_source"));
-        assert!(!norm.contains("igshid"));
-        assert!(norm.contains("a=1"));
-    }
 }
