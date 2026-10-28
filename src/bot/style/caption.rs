@@ -14,6 +14,7 @@ pub struct CaptionOptions<'a> {
     pub duration: Option<Duration>,
     pub elapsed: Duration,
     pub cache_label: Option<&'a str>,
+    pub media_hash: Option<&'a str>,
     pub sender_name: Option<&'a str>,
 }
 
@@ -97,9 +98,9 @@ pub fn build_media_caption(opts: CaptionOptions<'_>) -> String {
         metadata.push_str(&format!("⏱️ Process Time: {elapsed_str}\n"));
     }
 
-    if let Some(name) = opts.sender_name {
-        let escaped_name = html_escape(name);
-        metadata.push_str(&format!("👤 By: {escaped_name}\n"));
+    if let Some(hash) = opts.media_hash {
+        let short_hash = if hash.len() >= 16 { &hash[..16] } else { hash };
+        metadata.push_str(&format!("🔑 Hash: <code>{short_hash}</code>\n"));
     }
     metadata.push_str("🤖 Downloaded via @aetherstagingbot");
 

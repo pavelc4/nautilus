@@ -48,7 +48,7 @@ pub async fn send_cached_media(
         reply_to_msg_id,
         url,
         cached,
-        sender_name,
+        sender_name: _,
         start_time,
         is_coalesced,
     } = ctx;
@@ -87,6 +87,7 @@ pub async fn send_cached_media(
     }
 
     let cache_label = if is_coalesced { "coalesced" } else { "cached" };
+    let hash = crate::cache::compute_cache_hash(url);
     let caption = build_media_caption(CaptionOptions {
         title: cached.title.as_deref(),
         description: cached.description.as_deref(),
@@ -97,7 +98,8 @@ pub async fn send_cached_media(
         duration: None,
         elapsed: start_time.elapsed(),
         cache_label: Some(cache_label),
-        sender_name,
+        media_hash: Some(&hash),
+        sender_name: None,
     });
 
     let mut sent_any = false;
@@ -158,7 +160,7 @@ pub async fn send_dump_cdn_cached_media(
         reply_to_msg_id,
         url,
         record,
-        sender_name,
+        sender_name: _,
         start_time,
     } = ctx;
 
@@ -222,7 +224,8 @@ pub async fn send_dump_cdn_cached_media(
         duration: record.duration_secs.map(std::time::Duration::from_secs),
         elapsed: start_time.elapsed(),
         cache_label: Some("cdn cache"),
-        sender_name,
+        media_hash: Some(&record.hash),
+        sender_name: None,
     });
 
     let mut sent_any = false;

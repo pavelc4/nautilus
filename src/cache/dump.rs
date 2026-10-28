@@ -1,12 +1,26 @@
+use std::fmt::Write as _;
 use std::sync::Arc;
 use grammers_client::Client;
 use grammers_session::types::PeerRef;
 use libsql::params;
+use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock};
+
+pub fn compute_cache_hash(key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(key.as_bytes());
+    let result = hasher.finalize();
+    let mut hex = String::with_capacity(64);
+    for b in result {
+        let _ = write!(hex, "{:02x}", b);
+    }
+    hex
+}
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct DumpRecord {
     pub cache_key: String,
+    pub hash: String,
     pub channel_id: i64,
     pub message_ids: Vec<i32>,
     pub kind: String,
@@ -35,6 +49,7 @@ impl DumpCdnCache {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS dump_cdn (
                 cache_key TEXT PRIMARY KEY,
+                hash TEXT NOT NULL DEFAULT '',
                 channel_id INTEGER NOT NULL,
                 message_ids TEXT NOT NULL,
                 kind TEXT NOT NULL,
@@ -49,8 +64,22 @@ impl DumpCdnCache {
         )
         .await?;
 
+        // Attempt non-destructive migration in case table was created previously without hash
+        let _ = conn
+            .execute(
+                "ALTER TABLE dump_cdn ADD COLUMN hash TEXT NOT NULL DEFAULT ''",
+                params![],
+            )
+            .await;
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_dump_cdn_created ON dump_cdn(created_at);",
+            params![],
+        )
+        .await?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dump_cdn_hash ON dump_cdn(hash);",
             params![],
         )
         .await?;
@@ -64,7 +93,7 @@ impl DumpCdnCache {
         let conn = self.conn.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT cache_key, channel_id, message_ids, kind, title, description, \
+                "SELECT cache_key, hash, channel_id, message_ids, kind, title, description, \
                  total_bytes, dims, duration_secs, created_at \
                  FROM dump_cdn WHERE cache_key = ?1 LIMIT 1",
             )
@@ -81,16 +110,49 @@ impl DumpCdnCache {
             None => return Ok(None),
         };
 
+        Self::parse_row(row)
+    }
+
+    pub async fn get_by_hash(&self, hash_or_prefix: &str) -> anyhow::Result<Option<DumpRecord>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT cache_key, hash, channel_id, message_ids, kind, title, description, \
+                 total_bytes, dims, duration_secs, created_at \
+                 FROM dump_cdn WHERE hash LIKE ?1 LIMIT 1",
+            )
+            .await?;
+
+        let pattern = format!("{hash_or_prefix}%");
+        let row_opt = match stmt.query_row(params![pattern]).await {
+            Ok(row) => Some(row),
+            Err(libsql::Error::QueryReturnedNoRows) => None,
+            Err(e) => return Err(e.into()),
+        };
+
+        let row = match row_opt {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        Self::parse_row(row)
+    }
+
+    fn parse_row(row: libsql::Row) -> anyhow::Result<Option<DumpRecord>> {
         let key: String = row.get(0)?;
-        let channel_id: i64 = row.get(1)?;
-        let msg_ids_raw: String = row.get(2)?;
-        let kind: String = row.get(3)?;
-        let title: Option<String> = row.get(4)?;
-        let description: Option<String> = row.get(5)?;
-        let total_bytes: i64 = row.get(6)?;
-        let dims_raw: Option<String> = row.get(7)?;
-        let duration_secs: Option<i64> = row.get(8)?;
-        let created_at: i64 = row.get(9)?;
+        let mut hash: String = row.get(1)?;
+        if hash.is_empty() {
+            hash = compute_cache_hash(&key);
+        }
+        let channel_id: i64 = row.get(2)?;
+        let msg_ids_raw: String = row.get(3)?;
+        let kind: String = row.get(4)?;
+        let title: Option<String> = row.get(5)?;
+        let description: Option<String> = row.get(6)?;
+        let total_bytes: i64 = row.get(7)?;
+        let dims_raw: Option<String> = row.get(8)?;
+        let duration_secs: Option<i64> = row.get(9)?;
+        let created_at: i64 = row.get(10)?;
 
         let message_ids: Vec<i32> = serde_json::from_str(&msg_ids_raw).unwrap_or_default();
         let dims = dims_raw.and_then(|d| {
@@ -102,6 +164,7 @@ impl DumpCdnCache {
 
         Ok(Some(DumpRecord {
             cache_key: key,
+            hash,
             channel_id,
             message_ids,
             kind,
@@ -118,14 +181,20 @@ impl DumpCdnCache {
         let conn = self.conn.lock().await;
         let msg_ids_raw = serde_json::to_string(&record.message_ids)?;
         let dims_raw = record.dims.map(|(w, h)| format!("{w}x{h}"));
+        let hash = if record.hash.is_empty() {
+            compute_cache_hash(&record.cache_key)
+        } else {
+            record.hash.clone()
+        };
 
         conn.execute(
             "INSERT OR REPLACE INTO dump_cdn (
-                cache_key, channel_id, message_ids, kind, title, description,
+                cache_key, hash, channel_id, message_ids, kind, title, description,
                 total_bytes, dims, duration_secs, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 record.cache_key.clone(),
+                hash,
                 record.channel_id,
                 msg_ids_raw,
                 record.kind.clone(),

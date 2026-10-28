@@ -45,6 +45,7 @@ fn test_build_media_caption() {
         duration: None,
         elapsed: Duration::from_millis(1200),
         cache_label: Some("cached"),
+        media_hash: Some("7a8f9c0e1b2d3e4f5a6b7c8d9e0f1a2b"),
         sender_name: Some("Alice"),
     });
 
@@ -54,5 +55,6 @@ fn test_build_media_caption() {
     assert!(caption.contains("🏷 Type: ZIP Archive"));
     assert!(caption.contains("💾 Size: 5.00 MB"));
     assert!(caption.contains("⏱️ Process Time: 1.20s (cached)"));
-    assert!(caption.contains("👤 By: Alice"));
+    assert!(caption.contains("🔑 Hash: <code>7a8f9c0e1b2d3e4f</code>"));
+    assert!(!caption.contains("👤 By:"));
 }

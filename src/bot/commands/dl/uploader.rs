@@ -112,6 +112,7 @@ pub async fn upload_and_send_single(
     if let (Some(msg_id), Some(media), Some(dump_p)) = (dumped_msg_id, dumped_media, dump_peer) {
         let record = crate::cache::DumpRecord {
             cache_key: cache_key.to_string(),
+            hash: crate::cache::compute_cache_hash(cache_key),
             channel_id: dump_p.id.bot_api_dialog_id().unwrap_or(0),
             message_ids: vec![msg_id],
             kind: match meta.kind {
@@ -513,6 +514,7 @@ pub async fn upload_and_send_batches(
     if let (Some(dump_p), false) = (dump_peer, all_dump_msg_ids.is_empty()) {
         let record = crate::cache::DumpRecord {
             cache_key: cache_key.to_string(),
+            hash: crate::cache::compute_cache_hash(cache_key),
             channel_id: dump_p.id.bot_api_dialog_id().unwrap_or(0),
             message_ids: all_dump_msg_ids,
             kind: "photo".to_string(),

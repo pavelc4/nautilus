@@ -233,6 +233,7 @@ pub async fn handle_dl(
         None
     };
 
+    let hash = crate::cache::compute_cache_hash(&cache_key);
     let caption = build_media_caption(CaptionOptions {
         title: title.as_deref(),
         description: description.as_deref(),
@@ -243,7 +244,8 @@ pub async fn handle_dl(
         duration: None,
         elapsed: start_time.elapsed(),
         cache_label: None,
-        sender_name: sender_name.as_deref(),
+        media_hash: Some(&hash),
+        sender_name: None,
     });
 
     let (sent_medias, caption_remainder) = if total == 1 {

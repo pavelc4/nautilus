@@ -311,8 +311,10 @@ async fn test_dump_cdn_cache_crud() {
 
     let cache = DumpCdnCache::open(db_path.to_str().unwrap()).await.unwrap();
 
+    let hash = nautilus::cache::compute_cache_hash("https://x.com/user/status/123#mp4");
     let record = DumpRecord {
         cache_key: "https://x.com/user/status/123#mp4".to_string(),
+        hash: hash.clone(),
         channel_id: -1001234567890,
         message_ids: vec![42, 43],
         kind: "video".to_string(),
@@ -327,9 +329,10 @@ async fn test_dump_cdn_cache_crud() {
     // Insert
     cache.insert(&record).await.unwrap();
 
-    // Get
+    // Get by cache_key
     let fetched = cache.get(&record.cache_key).await.unwrap().expect("record should exist");
     assert_eq!(fetched.cache_key, record.cache_key);
+    assert_eq!(fetched.hash, hash);
     assert_eq!(fetched.channel_id, -1001234567890);
     assert_eq!(fetched.message_ids, vec![42, 43]);
     assert_eq!(fetched.kind, "video");
@@ -337,6 +340,11 @@ async fn test_dump_cdn_cache_crud() {
     assert_eq!(fetched.dims, Some((1920, 1080)));
     assert_eq!(fetched.total_bytes, 1048576);
     assert_eq!(fetched.duration_secs, Some(15));
+
+    // Get by short hash prefix
+    let fetched_by_hash = cache.get_by_hash(&hash[..16]).await.unwrap().expect("prefix search should work");
+    assert_eq!(fetched_by_hash.cache_key, record.cache_key);
+    assert_eq!(fetched_by_hash.hash, hash);
 
     // Delete
     cache.delete(&record.cache_key).await.unwrap();
