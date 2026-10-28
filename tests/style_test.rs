@@ -46,7 +46,8 @@ fn test_build_media_caption() {
         elapsed: Duration::from_millis(1200),
         cache_label: Some("cached"),
         media_hash: Some("7a8f9c0e1b2d3e4f5a6b7c8d9e0f1a2b"),
-        sender_name: Some("Alice"),
+        sender_name: Some("<a href=\"https://t.me/Alice\">Alice</a>"),
+        bot_username: Some("aetherstagingbot"),
     });
 
     assert!(caption.contains("<b>My Art &amp; Title</b>"));
@@ -56,5 +57,6 @@ fn test_build_media_caption() {
     assert!(caption.contains("💾 Size: 5.00 MB"));
     assert!(caption.contains("⏱️ Process Time: 1.20s (cached)"));
     assert!(caption.contains("🔑 Hash: <code>7a8f9c0e1b2d3e4f</code>"));
-    assert!(!caption.contains("👤 By:"));
+    assert!(caption.contains("👤 By: <a href=\"https://t.me/Alice\">Alice</a>"));
+    assert!(caption.contains("🤖 Downloaded via @aetherstagingbot"));
 }

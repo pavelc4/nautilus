@@ -49,6 +49,7 @@ pub async fn handle_message(
             )
             .await?;
 
+        let sender_display = super::command::sender_display(&msg);
         if let Ok(Some(record)) = state.dump_cdn.get_by_hash(hash).await
             && let Ok(Some(dump_peer)) = state.dump_manager.get_peer(&state.client).await
             && crate::bot::commands::dl::send_dump_cdn_cached_media(
@@ -60,7 +61,7 @@ pub async fn handle_message(
                     reply_to_msg_id: Some(msg.id()),
                     url: &record.cache_key,
                     record: &record,
-                    sender_name: None,
+                    sender_name: sender_display.as_deref(),
                     start_time: std::time::Instant::now(),
                 },
                 state,

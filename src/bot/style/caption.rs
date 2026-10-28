@@ -16,6 +16,7 @@ pub struct CaptionOptions<'a> {
     pub cache_label: Option<&'a str>,
     pub media_hash: Option<&'a str>,
     pub sender_name: Option<&'a str>,
+    pub bot_username: Option<&'a str>,
 }
 
 pub fn detect_platform(url: &str) -> Option<&'static str> {
@@ -102,7 +103,16 @@ pub fn build_media_caption(opts: CaptionOptions<'_>) -> String {
         let short_hash = if hash.len() >= 16 { &hash[..16] } else { hash };
         metadata.push_str(&format!("🔑 Hash: <code>{short_hash}</code>\n"));
     }
-    metadata.push_str("🤖 Downloaded via @aetherstagingbot");
+
+    if let Some(name) = opts.sender_name {
+        metadata.push_str(&format!("👤 By: {name}\n"));
+    }
+    if let Some(bot) = opts.bot_username.filter(|b| !b.is_empty()) {
+        let bot = bot.trim_start_matches('@');
+        metadata.push_str(&format!("🤖 Downloaded via @{bot}"));
+    } else {
+        metadata.push_str("🤖 Downloaded via Bot");
+    }
 
     if quote_content.is_empty() {
         metadata

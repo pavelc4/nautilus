@@ -4,7 +4,6 @@ use grammers_session::types::PeerRef;
 
 use crate::app::AppState;
 use crate::bot::commands;
-use crate::bot::style::html_escape;
 
 pub async fn dispatch_command(
     state: &Arc<AppState>,
@@ -286,16 +285,7 @@ pub async fn dispatch_command(
 pub fn sender_display(msg: &grammers_client::update::Message) -> Option<String> {
     match msg.sender()? {
         grammers_client::peer::Peer::User(user) => {
-            if let Some(username) = user.username() {
-                Some(format!("@{}", username))
-            } else {
-                let first_name = user.first_name().unwrap_or("User");
-                let escaped_first = html_escape(first_name);
-                let user_id = user.id().bare_id_unchecked();
-                Some(format!(
-                    "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
-                ))
-            }
+            Some(crate::bot::style::format_user_link(user))
         }
         _ => None,
     }

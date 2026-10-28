@@ -62,6 +62,7 @@ pub async fn upload_and_send_single(
     reply_to_msg_id: Option<i32>,
     item: MediaItem,
     caption: String,
+    dump_caption: String,
     cache_key: &str,
     state: &Arc<AppState>,
 ) -> anyhow::Result<Vec<Media>> {
@@ -109,8 +110,8 @@ pub async fn upload_and_send_single(
         }
     };
 
-    let media_msg = streaming::build_media_message(&caption, &meta, uploaded.clone(), thumb)
-        .invert_media(true);
+    let dump_msg = streaming::build_media_message(&dump_caption, &meta, uploaded.clone(), thumb.clone());
+    let media_msg = streaming::build_media_message(&caption, &meta, uploaded.clone(), thumb);
     let mut sent_medias = Vec::new();
 
     let dump_peer = state.dump_manager.get_peer(client).await.ok().flatten();
@@ -118,7 +119,7 @@ pub async fn upload_and_send_single(
     let mut dumped_media = None;
 
     if let Some(dump_p) = dump_peer {
-        let dump_upload = media_msg.clone();
+        let dump_upload = dump_msg.clone();
         match client.send_message(dump_p, dump_upload).await {
             Ok(msg) => {
                 if let Some(m) = msg.media() {
@@ -157,7 +158,6 @@ pub async fn upload_and_send_single(
 
         let user_msg = InputMessage::new()
             .html(&caption)
-            .invert_media(true)
             .copy_media(&media)
             .reply_to(reply_to_msg_id);
 
@@ -196,7 +196,6 @@ pub async fn upload_and_send_single(
                 tracing::warn!("failed to send media as photo/video: {e:#}, retrying as document");
                 let doc_msg = InputMessage::new()
                     .html(&caption)
-                    .invert_media(true)
                     .document(uploaded);
                 match send_with_flood_retry(|| {
                     client.send_message(chat, doc_msg.clone().reply_to(reply_to_msg_id))
@@ -234,6 +233,7 @@ pub async fn upload_and_send_batches(
     reply_to_msg_id: Option<i32>,
     items: Vec<MediaItem>,
     mut caption_to_send: Option<String>,
+    mut dump_caption_to_send: Option<String>,
     cache_key: &str,
     state: &Arc<AppState>,
 ) -> anyhow::Result<(Vec<Media>, Option<String>)> {
@@ -327,12 +327,17 @@ pub async fn upload_and_send_batches(
             } else {
                 String::new()
             };
-            let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone(), thumb)
-                .invert_media(true);
+            let dc = if is_last_batch {
+                dump_caption_to_send.take().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let dump_msg = streaming::build_media_message(&dc, &meta, uploaded.clone(), thumb.clone());
+            let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone(), thumb);
 
             let mut dumped = None;
             if let Some(dump_p) = dump_peer {
-                if let Ok(msg) = client.send_message(dump_p, media_msg.clone()).await {
+                if let Ok(msg) = client.send_message(dump_p, dump_msg).await {
                     if let Some(m) = msg.media() {
                         dumped = Some((msg.id(), m));
                     }
@@ -343,7 +348,6 @@ pub async fn upload_and_send_batches(
                 all_dump_msg_ids.push(msg_id);
                 let user_msg = InputMessage::new()
                     .html(&c)
-                    .invert_media(true)
                     .copy_media(&media)
                     .reply_to(reply_to_msg_id);
                 if let Ok(msg) = client.send_message(chat, user_msg).await {
@@ -367,7 +371,6 @@ pub async fn upload_and_send_batches(
                         tracing::warn!("single send failed ({e:#}), retrying as document");
                         let doc_msg = InputMessage::new()
                             .html(&c)
-                            .invert_media(true)
                             .document(uploaded);
                         if let Ok(msg) = client
                             .send_message(chat, doc_msg.reply_to(reply_to_msg_id))
@@ -419,7 +422,7 @@ pub async fn upload_and_send_batches(
                         .enumerate()
                         .map(|(i, (uploaded, thumb, meta))| {
                             let c = if i == 0 && is_last_batch && other_items.is_empty() {
-                                caption_to_send.clone().unwrap_or_default()
+                                dump_caption_to_send.clone().unwrap_or_default()
                             } else {
                                 String::new()
                             };
@@ -455,6 +458,7 @@ pub async fn upload_and_send_batches(
                                 album_sent = true;
                                 if is_last_batch && other_items.is_empty() {
                                     caption_to_send = None;
+                                    dump_caption_to_send = None;
                                 }
                             }
                         }
@@ -467,6 +471,7 @@ pub async fn upload_and_send_batches(
                             album_sent = true;
                             if is_last_batch && other_items.is_empty() {
                                 caption_to_send = None;
+                                dump_caption_to_send = None;
                             }
                             for msg_opt in msgs {
                                 if let Some(msg) = msg_opt
@@ -490,8 +495,7 @@ pub async fn upload_and_send_batches(
                     } else {
                         String::new()
                     };
-                    let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone(), thumb)
-                        .invert_media(true);
+                    let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone(), thumb);
                     match client
                         .send_message(chat, media_msg.reply_to(reply_to_msg_id))
                         .await
@@ -505,7 +509,6 @@ pub async fn upload_and_send_batches(
                             tracing::warn!("photo fallback failed ({e:#}), sending as document");
                             let doc_msg = InputMessage::new()
                                 .html(&c)
-                                .invert_media(true)
                                 .document(uploaded);
                             if let Ok(msg) = client
                                 .send_message(chat, doc_msg.reply_to(reply_to_msg_id))
@@ -525,7 +528,7 @@ pub async fn upload_and_send_batches(
                 } else {
                     String::new()
                 };
-                let doc_msg = InputMessage::new().html(&c).invert_media(true).document(uploaded);
+                let doc_msg = InputMessage::new().html(&c).document(uploaded);
                 if let Ok(msg) = client
                     .send_message(chat, doc_msg.reply_to(reply_to_msg_id))
                     .await

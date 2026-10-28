@@ -48,7 +48,7 @@ pub async fn send_cached_media(
         reply_to_msg_id,
         url,
         cached,
-        sender_name: _,
+        sender_name,
         start_time,
         is_coalesced,
     } = ctx;
@@ -87,7 +87,6 @@ pub async fn send_cached_media(
     }
 
     let cache_label = if is_coalesced { "coalesced" } else { "cached" };
-    let hash = crate::cache::compute_cache_hash(url);
     let caption = build_media_caption(CaptionOptions {
         title: cached.title.as_deref(),
         description: cached.description.as_deref(),
@@ -98,8 +97,9 @@ pub async fn send_cached_media(
         duration: None,
         elapsed: start_time.elapsed(),
         cache_label: Some(cache_label),
-        media_hash: Some(&hash),
-        sender_name: None,
+        media_hash: None,
+        sender_name,
+        bot_username: Some(state.bot_stats.bot_username()),
     });
 
     let mut sent_any = false;
@@ -108,7 +108,6 @@ pub async fn send_cached_media(
         if let Some(im) = media.to_raw_input_media() {
             let msg = InputMessage::new()
                 .html(caption)
-                .invert_media(true)
                 .media(im)
                 .reply_to(reply_to_msg_id);
             if client.send_message(chat, msg).await.is_ok() {
@@ -160,7 +159,7 @@ pub async fn send_dump_cdn_cached_media(
         reply_to_msg_id,
         url,
         record,
-        sender_name: _,
+        sender_name,
         start_time,
     } = ctx;
 
@@ -224,8 +223,9 @@ pub async fn send_dump_cdn_cached_media(
         duration: record.duration_secs.map(std::time::Duration::from_secs),
         elapsed: start_time.elapsed(),
         cache_label: Some("cdn cache"),
-        media_hash: Some(&record.hash),
-        sender_name: None,
+        media_hash: None,
+        sender_name,
+        bot_username: Some(state.bot_stats.bot_username()),
     });
 
     let mut sent_any = false;
@@ -233,7 +233,6 @@ pub async fn send_dump_cdn_cached_media(
         let media = &valid_medias[0];
         let msg = InputMessage::new()
             .html(caption)
-            .invert_media(true)
             .copy_media(media)
             .reply_to(reply_to_msg_id);
         if client.send_message(chat, msg).await.is_ok() {

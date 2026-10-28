@@ -3,7 +3,6 @@ use grammers_client::update::CallbackQuery;
 
 use crate::app::AppState;
 use crate::bot::commands;
-use crate::bot::style::html_escape;
 
 pub async fn handle_callback_query(
     state: &Arc<AppState>,
@@ -53,18 +52,7 @@ pub async fn handle_callback_query(
 
                                 let sender_name = match query.sender() {
                                     Some(grammers_client::peer::Peer::User(user)) => {
-                                        match user.username() {
-                                            Some(username) => Some(format!("@{}", username)),
-                                            None => {
-                                                let first_name =
-                                                    user.first_name().unwrap_or("User");
-                                                let escaped_first = html_escape(first_name);
-                                                let user_id = user.id().bare_id_unchecked();
-                                                Some(format!(
-                                                    "<a href=\"tg://user?id={user_id}\">{escaped_first}</a>"
-                                                ))
-                                            }
-                                        }
+                                        Some(crate::bot::style::format_user_link(user))
                                     }
                                     _ => None,
                                 };

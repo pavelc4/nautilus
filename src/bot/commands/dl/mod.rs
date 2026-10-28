@@ -244,8 +244,24 @@ pub async fn handle_dl(
         duration: None,
         elapsed: start_time.elapsed(),
         cache_label: None,
+        media_hash: None,
+        sender_name: sender_name.as_deref(),
+        bot_username: Some(state.bot_stats.bot_username()),
+    });
+
+    let dump_caption = build_media_caption(CaptionOptions {
+        title: title.as_deref(),
+        description: description.as_deref(),
+        source_url: &url,
+        type_str,
+        resolution,
+        total_bytes: total_size,
+        duration: None,
+        elapsed: start_time.elapsed(),
+        cache_label: None,
         media_hash: Some(&hash),
         sender_name: None,
+        bot_username: Some(state.bot_stats.bot_username()),
     });
 
     let (sent_medias, caption_remainder) = if total == 1 {
@@ -257,6 +273,7 @@ pub async fn handle_dl(
             reply_to_msg_id,
             item,
             caption,
+            dump_caption,
             &cache_key,
             state,
         )
@@ -270,6 +287,7 @@ pub async fn handle_dl(
             reply_to_msg_id,
             items,
             Some(caption),
+            Some(dump_caption),
             &cache_key,
             state,
         )

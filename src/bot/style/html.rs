@@ -28,3 +28,23 @@ pub fn code(s: &str) -> String {
 pub fn link(text: &str, url: &str) -> String {
     format!("<a href=\"{}\">{}</a>", html_escape(url), html_escape(text))
 }
+
+pub fn format_user_link(user: &grammers_client::peer::User) -> String {
+    let raw_name = match (user.first_name(), user.last_name()) {
+        (Some(f), Some(l)) if !f.trim().is_empty() && !l.trim().is_empty() => {
+            format!("{f} {l}")
+        }
+        (Some(f), _) if !f.trim().is_empty() => f.to_string(),
+        (_, Some(l)) if !l.trim().is_empty() => l.to_string(),
+        _ => user.username().unwrap_or("User").to_string(),
+    };
+    let escaped_name = html_escape(&raw_name);
+
+    if let Some(username) = user.username() {
+        format!("<a href=\"https://t.me/{username}\">{escaped_name}</a>")
+    } else {
+        let user_id = user.id().bare_id_unchecked();
+        format!("<a href=\"tg://user?id={user_id}\">{escaped_name}</a>")
+    }
+}
+
