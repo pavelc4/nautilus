@@ -1,14 +1,22 @@
 use async_trait::async_trait;
 
-use crate::provider::{MediaItem, MediaKind, MediaMeta, MediaReader, Provider};
+use crate::provider::{MediaItem, MediaKind, MediaMeta, Provider};
 
 pub mod client;
+pub mod concurrency;
 pub mod endpoint;
+pub mod metadata;
+pub mod stream;
 pub mod types;
+pub mod zipper;
 
 pub use client::*;
+pub use concurrency::*;
 pub use endpoint::AstraEndpoint;
+pub use metadata::*;
+pub use stream::*;
 pub use types::*;
+pub use zipper::*;
 
 pub struct AstraProvider {
     api_url: String,
@@ -17,15 +25,10 @@ pub struct AstraProvider {
 
 impl AstraProvider {
     pub fn new(api_url: String) -> Self {
-        let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(300)) // 5 minutes timeout for downloading large media
-            .tcp_nodelay(true)
-            .pool_max_idle_per_host(16)
-            .pool_idle_timeout(std::time::Duration::from_secs(90))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-        Self { api_url, client }
+        Self {
+            api_url,
+            client: build_http_client(),
+        }
     }
 
     async fn fetch_data(&self, url: &str) -> anyhow::Result<AstraData> {
@@ -274,86 +277,14 @@ impl Provider for AstraProvider {
                     .collect();
 
                 if !slideshow_items.is_empty() {
-                    use futures::stream::{self, StreamExt};
-                    use std::io::Write;
-                    use zip::write::SimpleFileOptions;
-                    use zip::CompressionMethod;
-
-                    let total_pages = slideshow_items.len();
-                    // Pre-allocate buffer in RAM: ~2MB per page (bounded up to 250MB for safety on 1GB RAM)
-                    let estimated_bytes = (total_pages * 2 * 1024 * 1024).min(250 * 1024 * 1024);
-                    let zip_buf = std::io::Cursor::new(Vec::with_capacity(estimated_bytes));
-                    let mut zip_writer = zip::ZipWriter::new(zip_buf);
-                    let zip_options = SimpleFileOptions::default()
-                        .compression_method(CompressionMethod::Stored); // 0% CPU, pure memory copy!
-
-                    let concurrency = dynamic_download_concurrency();
-                    let client = self.client.clone();
-
-                    let mut fetch_stream = stream::iter(slideshow_items.into_iter().enumerate())
-                        .map(|(idx, item)| {
-                            let client = client.clone();
-                            async move {
-                                let mut attempts = 0;
-                                loop {
-                                    attempts += 1;
-                                    let resp = client.get(&item.url).send().await;
-                                    match resp {
-                                        Ok(r) if r.status().is_success() => {
-                                            let ctype = r
-                                                .headers()
-                                                .get("content-type")
-                                                .and_then(|v| v.to_str().ok())
-                                                .map(String::from);
-                                            if let Ok(bytes) = r.bytes().await {
-                                                return (idx, Some(bytes), ctype);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                    if attempts >= 3 {
-                                        tracing::warn!(page = idx, "failed to download page after 3 attempts");
-                                        return (idx, None, None);
-                                    }
-                                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempts)).await;
-                                }
-                            }
-                        })
-                        .buffered(concurrency);
-
-                    while let Some((idx, bytes_opt, ctype)) = fetch_stream.next().await {
-                        if let Some(bytes) = bytes_opt {
-                            let ext = image_ext(ctype.as_deref()).unwrap_or("jpg");
-                            let entry_name = format!("{:03}_p{}.{}", idx + 1, idx, ext);
-                            if let Err(e) = zip_writer.start_file(&entry_name, zip_options) {
-                                tracing::warn!("failed to start zip entry {}: {}", entry_name, e);
-                                continue;
-                            }
-                            let _ = zip_writer.write_all(&bytes);
-                        }
-                    }
-
-                    let mut cursor = zip_writer.finish()?;
-                    let total_size = cursor.get_ref().len() as u64;
-                    cursor.set_position(0);
-                    let sanitized =
-                        sanitize_filename(title.as_deref().unwrap_or("gallery"), "gallery");
-                    let filename = format!("{sanitized}.zip");
-
-                    let meta = MediaMeta {
-                        filename,
-                        mime_type: "application/zip".into(),
-                        size: total_size,
-                        duration_secs: None,
-                        dims: None,
-                        kind: MediaKind::Photo,
-                        title: title.clone(),
-                        description: description.clone(),
-                        thumbnail_url: None,
-                    };
-
-                    let reader: MediaReader = Box::pin(cursor);
-                    return Ok(vec![MediaItem { meta, reader }]);
+                    let zip_item = build_in_ram_zip(
+                        self.client.clone(),
+                        slideshow_items,
+                        title.clone(),
+                        description.clone(),
+                    )
+                    .await?;
+                    return Ok(vec![zip_item]);
                 }
             } else if wants_photo {
                 let slideshow_items: Vec<_> = downloads
@@ -390,9 +321,9 @@ impl Provider for AstraProvider {
                                 thumbnail_url: None,
                             };
                             match download_item(&client, item.url, meta).await {
-                                Ok(media_item) => Some(media_item),
+                                Ok(m) => Some(m),
                                 Err(e) => {
-                                    tracing::warn!(idx, error = %e, "skipping slideshow photo: CDN fetch failed");
+                                    tracing::warn!("failed to download slide item: {}", e);
                                     None
                                 }
                             }
@@ -421,9 +352,18 @@ impl Provider for AstraProvider {
                                 .contains("mhtml")
                     })
                     .collect();
-                if let Some(a) = audio_items.first() {
-                    let sanitized = sanitize_filename(title.as_deref().unwrap_or("audio"), "audio");
+
+                let selected_audio = audio_items.iter().max_by_key(|a| {
+                    let q = a.quality.as_deref().unwrap_or("");
+                    let l = a.label.as_deref().unwrap_or("");
+                    parse_quality(q, l)
+                });
+
+                if let Some(a) = selected_audio {
+                    let sanitized =
+                        sanitize_filename(title.as_deref().unwrap_or("audio"), "audio");
                     let filename = format!("{sanitized}.mp3");
+
                     let meta = MediaMeta {
                         filename,
                         mime_type: "audio/mpeg".into(),
@@ -433,7 +373,7 @@ impl Provider for AstraProvider {
                         kind: MediaKind::Audio,
                         title: title.clone(),
                         description: description.clone(),
-                        thumbnail_url: None,
+                        thumbnail_url: video_thumb.clone(),
                     };
                     let media_item = download_item(&self.client, a.url.clone(), meta).await?;
                     items.push(media_item);
@@ -542,127 +482,4 @@ impl Provider for AstraProvider {
 
         Ok(extract_metadata_info(platform, &data))
     }
-}
-
-pub fn extract_metadata_info(
-    platform: &str,
-    data: &AstraData,
-) -> crate::provider::MediaMetadataInfo {
-    let mut has_video = false;
-    let mut has_photo = false;
-    let mut has_audio = false;
-    let mut photo_count = 0;
-
-    if let Some(ref downloads) = data.downloads {
-        has_video = downloads.iter().any(|d| {
-            d.media_type == AstraMediaType::Video
-                && !d.url.contains(".m3u8")
-                && !d.url.contains("hls_playlist")
-        });
-        let img_count = downloads
-            .iter()
-            .filter(|d| {
-                d.media_type == AstraMediaType::Image || d.media_type == AstraMediaType::Slide
-            })
-            .count();
-        if img_count > 0 {
-            has_photo = true;
-            photo_count += img_count;
-        }
-        has_audio = downloads.iter().any(|d| {
-            d.media_type == AstraMediaType::Audio
-                && d.quality.as_deref() != Some("storyboard")
-                && !d
-                    .label
-                    .as_deref()
-                    .unwrap_or("")
-                    .to_lowercase()
-                    .contains("mhtml")
-        });
-    }
-
-    if let Some(ref photos) = data.photos
-        && !photos.is_empty()
-    {
-        has_photo = true;
-        photo_count += photos.len();
-    }
-
-    if let Some(ref videos) = data.videos
-        && !videos.is_empty()
-    {
-        has_video = true;
-    }
-
-    if data.result_type.as_deref() == Some("video") {
-        has_video = true;
-    }
-
-    // For Twitter/X, if a tweet contains a video, any photo in downloads is just
-    // the video's preview thumbnail — don't flag has_photo so user isn't prompted
-    // with a bogus "Photo" / "Download All" button, unless the tweet has multiple/mixed media.
-    if platform == "twitter" && has_video && data.result_type.as_deref() != Some("multiple") {
-        has_photo = false;
-        photo_count = 0;
-    }
-
-    if has_photo && photo_count == 0 {
-        photo_count = 1;
-    }
-
-    crate::provider::MediaMetadataInfo {
-        has_video,
-        has_photo,
-        has_audio,
-        photo_count,
-    }
-}
-
-/// Collapse Meta video quality-variants down to the best one per poster.
-///
-/// A Facebook/Instagram single video comes back as several entries (hd, sd, …)
-/// that all carry the same `thumbnail` (poster); a real carousel has distinct
-/// videos with distinct posters. Group by poster and keep the highest-quality
-/// entry per group — order-preserving — so the bot sends one best video per
-/// real video instead of hd+sd duplicates. Entries with no thumbnail are treated
-/// as distinct (kept as-is), so a source that omits posters is never over-merged.
-pub fn select_best_videos(videos: &[AstraVideoItem]) -> Vec<&AstraVideoItem> {
-    let mut groups: Vec<(Option<&str>, &AstraVideoItem)> = Vec::new();
-    for v in videos {
-        let key = v.thumbnail.as_deref().filter(|t| !t.is_empty());
-        if let Some(k) = key
-            && let Some(slot) = groups.iter_mut().find(|(gk, _)| *gk == Some(k))
-        {
-            let cur = parse_quality(slot.1.quality.as_deref().unwrap_or(""), "");
-            let cand = parse_quality(v.quality.as_deref().unwrap_or(""), "");
-            if cand > cur {
-                slot.1 = v;
-            }
-            continue;
-        }
-        groups.push((key, v));
-    }
-    groups.into_iter().map(|(_, v)| v).collect()
-}
-
-/// Calculates dynamic download concurrency based on available CPU hardware threads.
-/// Since network downloading is I/O-bound, 2 concurrent workers per CPU thread
-/// provides optimal throughput without overloading memory.
-///
-/// Can be overridden via the `DOWNLOAD_CONCURRENCY` environment variable.
-/// Safe bounds: [2, 16] (guards against OOM on small VPS, prevents 429 rate limits on large servers).
-pub fn dynamic_download_concurrency() -> usize {
-    if let Ok(val) = std::env::var("DOWNLOAD_CONCURRENCY") {
-        if let Ok(n) = val.parse::<usize>() {
-            if n > 0 {
-                return n;
-            }
-        }
-    }
-
-    let cpus = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or_else(|_| num_cpus::get());
-
-    (cpus * 2).clamp(2, 16)
 }
