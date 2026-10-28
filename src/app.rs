@@ -24,7 +24,7 @@ pub struct AppState {
     pub worker_pool: Arc<crate::pool::WorkerPool>,
     pub singleflight: Arc<crate::pool::SingleFlight<()>>,
     pub pending_downloads: Arc<dashmap::DashMap<String, String>>,
-    pub media_cache: Arc<dashmap::DashMap<String, CachedMedia>>,
+    pub media_cache: Arc<crate::cache::BoundedCache<String, CachedMedia>>,
     /// Shared HTTP client for lightweight diagnostic calls (/check, /status, /speedtest).
     /// Per-call timeouts are applied per-request via `.timeout(..)` on the builder, so a
     /// single connection pool + TLS state is reused instead of rebuilt on every command.
@@ -58,6 +58,9 @@ impl AppState {
 
         let http = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
+            .tcp_nodelay(true)
+            .pool_max_idle_per_host(16)
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -67,6 +70,11 @@ impl AppState {
         let bot_stats = BotStats::new(session.bot_username);
         bot_stats.set_total_workers(worker_pool.total_slots() as u64);
 
+        let media_cache = Arc::new(crate::cache::BoundedCache::new(
+            1000,
+            std::time::Duration::from_secs(24 * 3600),
+        ));
+
         let state = Arc::new(Self {
             client: session.client,
             config,
@@ -75,7 +83,7 @@ impl AppState {
             worker_pool,
             singleflight: Arc::new(crate::pool::SingleFlight::new()),
             pending_downloads: Arc::new(dashmap::DashMap::new()),
-            media_cache: Arc::new(dashmap::DashMap::new()),
+            media_cache,
             http,
             topic_settings,
         });

@@ -20,6 +20,9 @@ impl AstraProvider {
         let client = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(300)) // 5 minutes timeout for downloading large media
+            .tcp_nodelay(true)
+            .pool_max_idle_per_host(16)
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self { api_url, client }

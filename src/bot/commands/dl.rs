@@ -250,25 +250,24 @@ pub async fn handle_dl(
     let status_id = status_msg.id();
 
     // 1. Direct cache hit
-    if let Some(cached) = state.media_cache.get(&cache_key) {
-        let cached = cached.value();
-        if !cached.medias.is_empty() {
-            return send_cached_media(
-                client,
-                CachedMediaContext {
-                    chat,
-                    status_id,
-                    reply_to_msg_id,
-                    url: &url,
-                    cached,
-                    sender_name: sender_name.as_deref(),
-                    start_time,
-                    is_coalesced: false,
-                },
-                state,
-            )
-            .await;
-        }
+    if let Some(cached) = state.media_cache.get(&cache_key)
+        && !cached.medias.is_empty()
+    {
+        return send_cached_media(
+            client,
+            CachedMediaContext {
+                chat,
+                status_id,
+                reply_to_msg_id,
+                url: &url,
+                cached: &cached,
+                sender_name: sender_name.as_deref(),
+                start_time,
+                is_coalesced: false,
+            },
+            state,
+        )
+        .await;
     }
 
     // 2. In-flight request deduplication: if identical URL is currently downloading, wait for it
@@ -276,25 +275,24 @@ pub async fn handle_dl(
         Ok(crate::pool::FlightStatus::Leader(leader)) => Some(leader),
         Ok(crate::pool::FlightStatus::Follower(())) => {
             // Concurrent leader finished and populated media_cache!
-            if let Some(cached) = state.media_cache.get(&cache_key) {
-                let cached = cached.value();
-                if !cached.medias.is_empty() {
-                    return send_cached_media(
-                        client,
-                        CachedMediaContext {
-                            chat,
-                            status_id,
-                            reply_to_msg_id,
-                            url: &url,
-                            cached,
-                            sender_name: sender_name.as_deref(),
-                            start_time,
-                            is_coalesced: true,
-                        },
-                        state,
-                    )
-                    .await;
-                }
+            if let Some(cached) = state.media_cache.get(&cache_key)
+                && !cached.medias.is_empty()
+            {
+                return send_cached_media(
+                    client,
+                    CachedMediaContext {
+                        chat,
+                        status_id,
+                        reply_to_msg_id,
+                        url: &url,
+                        cached: &cached,
+                        sender_name: sender_name.as_deref(),
+                        start_time,
+                        is_coalesced: true,
+                    },
+                    state,
+                )
+                .await;
             }
             None
         }
