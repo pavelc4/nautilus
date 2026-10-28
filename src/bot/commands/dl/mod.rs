@@ -250,7 +250,7 @@ pub async fn handle_dl(
 
     let (sent_medias, caption_remainder) = if total == 1 {
         let item = items.into_iter().next().unwrap();
-        let medias = upload_and_send_single(
+        upload_and_send_single(
             client,
             chat,
             status_id,
@@ -261,8 +261,7 @@ pub async fn handle_dl(
             start_time,
             state,
         )
-        .await?;
-        (medias, None)
+        .await?
     } else {
         upload_and_send_batches(
             client,

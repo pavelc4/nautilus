@@ -66,7 +66,7 @@ pub async fn upload_and_send_single(
     cache_key: &str,
     start_time: std::time::Instant,
     state: &Arc<AppState>,
-) -> anyhow::Result<Vec<Media>> {
+) -> anyhow::Result<(Vec<Media>, Option<String>)> {
     let _ = client
         .edit_message(
             chat,
@@ -121,7 +121,7 @@ pub async fn upload_and_send_single(
         dump_opts.media_hash = Some(&dump_hash);
         dump_opts.sender_name = None;
         dump_opts.elapsed = start_time.elapsed();
-        let dump_caption = build_media_caption(dump_opts);
+        let dump_caption = build_media_caption(dump_opts).caption;
         let dump_upload = streaming::build_media_message(&dump_caption, &meta, uploaded.clone(), thumb.clone());
         match client.send_message(dump_p, dump_upload).await {
             Ok(msg) => {
@@ -139,7 +139,9 @@ pub async fn upload_and_send_single(
     let mut user_opts = caption_opts;
     user_opts.media_hash = None;
     user_opts.elapsed = start_time.elapsed();
-    let user_caption = build_media_caption(user_opts);
+    let user_cap_res = build_media_caption(user_opts);
+    let user_caption = user_cap_res.caption;
+    let separate_text = user_cap_res.separate_text;
     let mut sent_medias = Vec::new();
 
     if let (Some(msg_id), Some(media), Some(dump_p)) = (dumped_msg_id, dumped_media, dump_peer) {
@@ -234,7 +236,7 @@ pub async fn upload_and_send_single(
         }
     }
 
-    Ok(sent_medias)
+    Ok((sent_medias, separate_text))
 }
 
 pub async fn upload_and_send_batches(
@@ -264,6 +266,7 @@ pub async fn upload_and_send_batches(
     let total_batches = batches.len();
     let mut sent_medias = Vec::new();
     let mut all_dump_msg_ids = Vec::new();
+    let mut separate_text = None;
     let dump_peer = state.dump_manager.get_peer(client).await.ok().flatten();
 
     for (batch_idx, batch) in batches.into_iter().enumerate() {
@@ -338,7 +341,9 @@ pub async fn upload_and_send_batches(
                     let mut u = opts.clone();
                     u.media_hash = None;
                     u.elapsed = start_time.elapsed();
-                    build_media_caption(u)
+                    let res = build_media_caption(u);
+                    separate_text = res.separate_text;
+                    res.caption
                 }).unwrap_or_default()
             } else {
                 String::new()
@@ -350,7 +355,7 @@ pub async fn upload_and_send_batches(
                     d.media_hash = Some(&dump_hash);
                     d.sender_name = None;
                     d.elapsed = start_time.elapsed();
-                    build_media_caption(d)
+                    build_media_caption(d).caption
                 }).unwrap_or_default()
             } else {
                 String::new()
@@ -443,7 +448,7 @@ pub async fn upload_and_send_batches(
                                     d.media_hash = Some(&dump_hash);
                                     d.sender_name = None;
                                     d.elapsed = start_time.elapsed();
-                                    build_media_caption(d)
+                                    build_media_caption(d).caption
                                 }).unwrap_or_default()
                             } else {
                                 String::new()
@@ -468,8 +473,9 @@ pub async fn upload_and_send_batches(
                                                 let mut u = opts.clone();
                                                 u.media_hash = None;
                                                 u.elapsed = start_time.elapsed();
-                                                let c = build_media_caption(u);
-                                                input_media = input_media.html(&c);
+                                                let res = build_media_caption(u);
+                                                input_media = input_media.html(&res.caption);
+                                                separate_text = res.separate_text;
                                             }
                                         }
                                         input_media = input_media.reply_to(reply_to_msg_id);
@@ -498,7 +504,9 @@ pub async fn upload_and_send_batches(
                                 let mut u = opts.clone();
                                 u.media_hash = None;
                                 u.elapsed = start_time.elapsed();
-                                build_media_caption(u)
+                                let res = build_media_caption(u);
+                                separate_text = res.separate_text;
+                                res.caption
                             }).unwrap_or_default()
                         } else {
                             String::new()
@@ -536,7 +544,9 @@ pub async fn upload_and_send_batches(
                         caption_opts.take().map(|mut opts| {
                             opts.media_hash = None;
                             opts.elapsed = start_time.elapsed();
-                            build_media_caption(opts)
+                            let res = build_media_caption(opts);
+                            separate_text = res.separate_text;
+                            res.caption
                         }).unwrap_or_default()
                     } else {
                         String::new()
@@ -573,7 +583,9 @@ pub async fn upload_and_send_batches(
                     caption_opts.take().map(|mut opts| {
                         opts.media_hash = None;
                         opts.elapsed = start_time.elapsed();
-                        build_media_caption(opts)
+                        let res = build_media_caption(opts);
+                        separate_text = res.separate_text;
+                        res.caption
                     }).unwrap_or_default()
                 } else {
                     String::new()
@@ -610,10 +622,12 @@ pub async fn upload_and_send_batches(
         let _ = state.dump_cdn.insert(&record).await;
     }
 
-    let caption_remainder = caption_opts.map(|mut opts| {
-        opts.media_hash = None;
-        opts.elapsed = start_time.elapsed();
-        build_media_caption(opts)
+    let caption_remainder = separate_text.or_else(|| {
+        caption_opts.map(|mut opts| {
+            opts.media_hash = None;
+            opts.elapsed = start_time.elapsed();
+            build_media_caption(opts).caption
+        })
     });
     Ok((sent_medias, caption_remainder))
 }

@@ -35,7 +35,7 @@ fn test_detect_platform_and_source_link() {
 
 #[test]
 fn test_build_media_caption() {
-    let caption = build_media_caption(CaptionOptions {
+    let res = build_media_caption(CaptionOptions {
         title: Some("My Art & Title"),
         description: Some("Artwork description"),
         source_url: "https://pixiv.net/en/artworks/123",
@@ -50,6 +50,8 @@ fn test_build_media_caption() {
         bot_username: Some("aetherstagingbot"),
     });
 
+    assert!(res.separate_text.is_none());
+    let caption = res.caption;
     assert!(caption.contains("<b>My Art &amp; Title</b>"));
     assert!(caption.contains("<blockquote>"));
     assert!(caption.contains("📎 <b>Source:</b> <a href=\"https://pixiv.net/en/artworks/123\">Pixiv</a>"));
@@ -60,4 +62,33 @@ fn test_build_media_caption() {
     assert!(caption.contains("👤 <b>By:</b> <a href=\"https://t.me/Alice\">Alice</a>"));
     assert!(caption.contains("🤖 Downloaded via @aetherstagingbot"));
     assert!(caption.contains("💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>"));
+}
+
+#[test]
+fn test_build_media_caption_long_split() {
+    let long_desc = "x".repeat(1200);
+    let res = build_media_caption(CaptionOptions {
+        title: Some("Very Long Caption"),
+        description: Some(&long_desc),
+        source_url: "https://x.com/user/status/123",
+        type_str: "Photo",
+        resolution: None,
+        total_bytes: 1024,
+        duration: None,
+        elapsed: Duration::from_millis(500),
+        cache_label: None,
+        media_hash: None,
+        sender_name: Some("Alice"),
+        bot_username: Some("mybot"),
+    });
+
+    // When total caption exceeds 1000 characters, description is sent separately
+    assert!(res.separate_text.is_some());
+    assert!(!res.caption.contains("<blockquote>"));
+    assert!(res.caption.contains("📎 <b>Source:</b>"));
+    assert!(res.caption.contains("📁 <b>Size:</b>"));
+
+    let sep = res.separate_text.unwrap();
+    assert!(sep.contains("<b>Very Long Caption</b>"));
+    assert!(sep.contains(&long_desc));
 }

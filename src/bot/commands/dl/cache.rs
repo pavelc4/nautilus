@@ -87,7 +87,7 @@ pub async fn send_cached_media(
     }
 
     let cache_label = if is_coalesced { "coalesced" } else { "cached" };
-    let caption = build_media_caption(CaptionOptions {
+    let cap_res = build_media_caption(CaptionOptions {
         title: cached.title.as_deref(),
         description: cached.description.as_deref(),
         source_url: url,
@@ -101,6 +101,8 @@ pub async fn send_cached_media(
         sender_name,
         bot_username: Some(state.bot_stats.bot_username()),
     });
+    let caption = cap_res.caption;
+    let separate_text = cap_res.separate_text;
 
     let mut sent_any = false;
     if cached.medias.len() == 1 {
@@ -130,6 +132,14 @@ pub async fn send_cached_media(
     }
 
     if sent_any {
+        if let Some(ref sep) = separate_text {
+            let _ = client
+                .send_message(
+                    chat,
+                    InputMessage::new().html(sep).reply_to(reply_to_msg_id),
+                )
+                .await;
+        }
         let _ = client.delete_messages(chat, &[status_id]).await;
         state.bot_stats.record_success();
     }
@@ -213,7 +223,7 @@ pub async fn send_dump_cdn_cached_media(
         _ => "Media",
     };
 
-    let caption = build_media_caption(CaptionOptions {
+    let cap_res = build_media_caption(CaptionOptions {
         title: record.title.as_deref(),
         description: record.description.as_deref(),
         source_url: url,
@@ -227,6 +237,8 @@ pub async fn send_dump_cdn_cached_media(
         sender_name,
         bot_username: Some(state.bot_stats.bot_username()),
     });
+    let caption = cap_res.caption;
+    let separate_text = cap_res.separate_text;
 
     let mut sent_any = false;
     if valid_medias.len() == 1 {
@@ -254,6 +266,14 @@ pub async fn send_dump_cdn_cached_media(
     }
 
     if sent_any {
+        if let Some(ref sep) = separate_text {
+            let _ = client
+                .send_message(
+                    chat,
+                    InputMessage::new().html(sep).reply_to(reply_to_msg_id),
+                )
+                .await;
+        }
         let _ = client.delete_messages(chat, &[status_id]).await;
         state.bot_stats.record_success();
 

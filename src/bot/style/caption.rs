@@ -3,6 +3,12 @@ use std::time::Duration;
 use super::format::{format_bytes, format_duration, format_resolution};
 use super::html::html_escape;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptionResult {
+    pub caption: String,
+    pub separate_text: Option<String>,
+}
+
 #[derive(Clone, Default)]
 pub struct CaptionOptions<'a> {
     pub title: Option<&'a str>,
@@ -66,7 +72,7 @@ pub fn get_source_link(url: &str) -> String {
     format!("<a href=\"{escaped_url}\">Link</a>")
 }
 
-pub fn build_media_caption(opts: CaptionOptions<'_>) -> String {
+pub fn build_media_caption(opts: CaptionOptions<'_>) -> CaptionResult {
     let mut quote_content = String::new();
     if let Some(t) = opts.title {
         let escaped_t = html_escape(t);
@@ -115,8 +121,23 @@ pub fn build_media_caption(opts: CaptionOptions<'_>) -> String {
     metadata.push_str("\n💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>");
 
     if quote_content.is_empty() {
-        metadata
+        CaptionResult {
+            caption: metadata,
+            separate_text: None,
+        }
     } else {
-        format!("<blockquote>{quote_content}</blockquote>\n\n{metadata}")
+        let blockquote = format!("<blockquote>{quote_content}</blockquote>\n\n");
+        // Telegram media caption limit is 1024 UTF-16 code units.
+        if blockquote.chars().count() + metadata.chars().count() > 1000 {
+            CaptionResult {
+                caption: metadata,
+                separate_text: Some(format!("<blockquote>{quote_content}</blockquote>")),
+            }
+        } else {
+            CaptionResult {
+                caption: format!("{}{}", blockquote, metadata),
+                separate_text: None,
+            }
+        }
     }
 }
