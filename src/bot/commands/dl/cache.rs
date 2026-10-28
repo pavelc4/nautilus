@@ -116,13 +116,15 @@ pub async fn send_cached_media(
             sent_any = true;
         }
     } else {
+        let total_batches = (cached.medias.len() + ALBUM_MAX - 1) / ALBUM_MAX;
         for (batch_idx, chunk) in cached.medias.chunks(ALBUM_MAX).enumerate() {
+            let is_last_batch = batch_idx + 1 == total_batches;
             if chunk.len() == 1 {
                 let media = &chunk[0];
                 let mut msg = InputMessage::new()
                     .copy_media(media)
                     .reply_to(reply_to_msg_id);
-                if batch_idx == 0 {
+                if is_last_batch {
                     msg = msg.html(&caption);
                 }
                 if client.send_message(chat, msg).await.is_ok() {
@@ -133,7 +135,7 @@ pub async fn send_cached_media(
                 for (idx, media) in chunk.iter().enumerate() {
                     let mut input_media =
                         grammers_client::media::InputMedia::new().copy_media(media);
-                    if batch_idx == 0 && idx == 0 {
+                    if is_last_batch && idx == 0 {
                         input_media = input_media.html(&caption).reply_to(reply_to_msg_id);
                     }
                     album_medias.push(input_media);
@@ -274,13 +276,15 @@ pub async fn send_dump_cdn_cached_media(
             sent_any = true;
         }
     } else {
+        let total_batches = (valid_medias.len() + ALBUM_MAX - 1) / ALBUM_MAX;
         for (batch_idx, chunk) in valid_medias.chunks(ALBUM_MAX).enumerate() {
+            let is_last_batch = batch_idx + 1 == total_batches;
             if chunk.len() == 1 {
                 let media = &chunk[0];
                 let mut msg = InputMessage::new()
                     .copy_media(media)
                     .reply_to(reply_to_msg_id);
-                if batch_idx == 0 {
+                if is_last_batch {
                     msg = msg.html(&caption);
                 }
                 if client.send_message(chat, msg).await.is_ok() {
@@ -291,7 +295,7 @@ pub async fn send_dump_cdn_cached_media(
                 for (idx, media) in chunk.iter().enumerate() {
                     let mut input_media =
                         grammers_client::media::InputMedia::new().copy_media(media);
-                    if batch_idx == 0 && idx == 0 {
+                    if is_last_batch && idx == 0 {
                         input_media = input_media.html(&caption).reply_to(reply_to_msg_id);
                     }
                     album_medias.push(input_media);
