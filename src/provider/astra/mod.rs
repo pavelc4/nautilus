@@ -287,7 +287,7 @@ impl Provider for AstraProvider {
                     let zip_options = SimpleFileOptions::default()
                         .compression_method(CompressionMethod::Stored); // 0% CPU, pure memory copy!
 
-                    let concurrency = 4; // Sweet spot for 1c/2t/1GB RAM
+                    let concurrency = dynamic_download_concurrency();
                     let client = self.client.clone();
 
                     let mut fetch_stream = stream::iter(slideshow_items.into_iter().enumerate())
@@ -365,7 +365,7 @@ impl Provider for AstraProvider {
                     .cloned()
                     .collect();
 
-                let concurrency = 4; // 4 concurrent workers (tuned for 1c/2t/1GB RAM)
+                let concurrency = dynamic_download_concurrency();
                 let client = self.client.clone();
 
                 use futures::stream::{self, StreamExt};
@@ -643,4 +643,26 @@ pub fn select_best_videos(videos: &[AstraVideoItem]) -> Vec<&AstraVideoItem> {
         groups.push((key, v));
     }
     groups.into_iter().map(|(_, v)| v).collect()
+}
+
+/// Calculates dynamic download concurrency based on available CPU hardware threads.
+/// Since network downloading is I/O-bound, 2 concurrent workers per CPU thread
+/// provides optimal throughput without overloading memory.
+///
+/// Can be overridden via the `DOWNLOAD_CONCURRENCY` environment variable.
+/// Safe bounds: [2, 16] (guards against OOM on small VPS, prevents 429 rate limits on large servers).
+pub fn dynamic_download_concurrency() -> usize {
+    if let Ok(val) = std::env::var("DOWNLOAD_CONCURRENCY") {
+        if let Ok(n) = val.parse::<usize>() {
+            if n > 0 {
+                return n;
+            }
+        }
+    }
+
+    let cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or_else(|_| num_cpus::get());
+
+    (cpus * 2).clamp(2, 16)
 }

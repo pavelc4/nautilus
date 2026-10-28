@@ -158,3 +158,21 @@ fn test_metadata_photo_count() {
     assert!(meta.has_photo);
     assert_eq!(meta.photo_count, 71);
 }
+
+#[test]
+fn test_dynamic_download_concurrency() {
+    use nautilus::provider::astra::dynamic_download_concurrency;
+
+    let c = dynamic_download_concurrency();
+    assert!(c >= 2 && c <= 16, "concurrency must be between 2 and 16");
+
+    // Test env override
+    unsafe {
+        std::env::set_var("DOWNLOAD_CONCURRENCY", "8");
+    }
+    assert_eq!(dynamic_download_concurrency(), 8);
+
+    unsafe {
+        std::env::remove_var("DOWNLOAD_CONCURRENCY");
+    }
+}
