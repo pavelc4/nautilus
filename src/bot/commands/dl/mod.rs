@@ -4,7 +4,7 @@ use grammers_client::message::InputMessage;
 use grammers_session::types::PeerRef;
 
 use crate::app::AppState;
-use crate::bot::style::{build_media_caption, CaptionOptions};
+use crate::bot::style::CaptionOptions;
 use crate::provider::MediaKind;
 
 pub mod cache;
@@ -233,8 +233,7 @@ pub async fn handle_dl(
         None
     };
 
-    let hash = crate::cache::compute_cache_hash(&cache_key);
-    let caption = build_media_caption(CaptionOptions {
+    let caption_opts = CaptionOptions {
         title: title.as_deref(),
         description: description.as_deref(),
         source_url: &url,
@@ -242,27 +241,12 @@ pub async fn handle_dl(
         resolution,
         total_bytes: total_size,
         duration: None,
-        elapsed: start_time.elapsed(),
+        elapsed: std::time::Duration::ZERO,
         cache_label: None,
         media_hash: None,
         sender_name: sender_name.as_deref(),
         bot_username: Some(state.bot_stats.bot_username()),
-    });
-
-    let dump_caption = build_media_caption(CaptionOptions {
-        title: title.as_deref(),
-        description: description.as_deref(),
-        source_url: &url,
-        type_str,
-        resolution,
-        total_bytes: total_size,
-        duration: None,
-        elapsed: start_time.elapsed(),
-        cache_label: None,
-        media_hash: Some(&hash),
-        sender_name: None,
-        bot_username: Some(state.bot_stats.bot_username()),
-    });
+    };
 
     let (sent_medias, caption_remainder) = if total == 1 {
         let item = items.into_iter().next().unwrap();
@@ -272,9 +256,9 @@ pub async fn handle_dl(
             status_id,
             reply_to_msg_id,
             item,
-            caption,
-            dump_caption,
+            caption_opts,
             &cache_key,
+            start_time,
             state,
         )
         .await?;
@@ -286,9 +270,9 @@ pub async fn handle_dl(
             status_id,
             reply_to_msg_id,
             items,
-            Some(caption),
-            Some(dump_caption),
+            Some(caption_opts),
             &cache_key,
+            start_time,
             state,
         )
         .await?

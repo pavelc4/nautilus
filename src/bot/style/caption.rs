@@ -3,7 +3,7 @@ use std::time::Duration;
 use super::format::{format_bytes, format_duration, format_resolution};
 use super::html::html_escape;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct CaptionOptions<'a> {
     pub title: Option<&'a str>,
     pub description: Option<&'a str>,
@@ -26,7 +26,7 @@ pub fn detect_platform(url: &str) -> Option<&'static str> {
     } else if lower.contains("tiktok.com") {
         Some("TikTok")
     } else if lower.contains("twitter.com") || lower.contains("x.com") {
-        Some("Twitter/X")
+        Some("X")
     } else if lower.contains("facebook.com") || lower.contains("fb.watch") {
         Some("Facebook")
     } else if lower.contains("threads.net") {
@@ -79,40 +79,40 @@ pub fn build_media_caption(opts: CaptionOptions<'_>) -> String {
     let quote_content = quote_content.trim();
 
     let mut metadata = String::new();
-    metadata.push_str(&format!("🔗 Source: {}\n", get_source_link(opts.source_url)));
-    metadata.push_str(&format!("🏷 Type: {}\n", opts.type_str));
+    metadata.push_str(&format!("📎 <b>Source:</b> {}\n", get_source_link(opts.source_url)));
+    metadata.push_str(&format!("📄 <b>Type:</b> {}\n", opts.type_str));
 
     if let Some(dims) = opts.resolution {
-        metadata.push_str(&format!("📺 Resolution: {}\n", format_resolution(dims)));
+        metadata.push_str(&format!("📺 <b>Resolution:</b> {}\n", format_resolution(dims)));
     }
     if let Some(dur) = opts.duration {
-        metadata.push_str(&format!("⏱ Duration: {}\n", format_duration(dur)));
+        metadata.push_str(&format!("⏱ <b>Duration:</b> {}\n", format_duration(dur)));
     }
     if opts.total_bytes > 0 {
-        metadata.push_str(&format!("💾 Size: {}\n", format_bytes(opts.total_bytes)));
+        metadata.push_str(&format!("📁 <b>Size:</b> {}\n", format_bytes(opts.total_bytes)));
     }
 
     let elapsed_str = format_duration(opts.elapsed);
     if let Some(label) = opts.cache_label {
-        metadata.push_str(&format!("⏱️ Process Time: {elapsed_str} ({label})\n"));
+        metadata.push_str(&format!("⏱ <b>Process Time:</b> {elapsed_str} (<code>{label}</code>)\n"));
     } else {
-        metadata.push_str(&format!("⏱️ Process Time: {elapsed_str}\n"));
+        metadata.push_str(&format!("⏱ <b>Process Time:</b> {elapsed_str}\n"));
     }
 
     if let Some(hash) = opts.media_hash {
         let short_hash = if hash.len() >= 16 { &hash[..16] } else { hash };
-        metadata.push_str(&format!("🔑 Hash: <code>{short_hash}</code>\n"));
+        metadata.push_str(&format!("🔑 <b>Hash:</b> <code>{short_hash}</code>\n"));
     }
 
     if let Some(name) = opts.sender_name {
-        metadata.push_str(&format!("👤 By: {name}\n"));
+        metadata.push_str(&format!("👤 <b>By:</b> {name}\n"));
     }
     if let Some(bot) = opts.bot_username.filter(|b| !b.is_empty()) {
         let bot = bot.trim_start_matches('@');
-        metadata.push_str(&format!("🤖 Downloaded via @{bot}"));
-    } else {
-        metadata.push_str("🤖 Downloaded via Bot");
+        metadata.push_str(&format!("🤖 Downloaded via @{bot}\n"));
     }
+
+    metadata.push_str("\n💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>");
 
     if quote_content.is_empty() {
         metadata

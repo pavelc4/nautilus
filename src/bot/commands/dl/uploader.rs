@@ -5,6 +5,7 @@ use grammers_client::message::InputMessage;
 use grammers_session::types::PeerRef;
 
 use crate::app::AppState;
+use crate::bot::style::{build_media_caption, CaptionOptions};
 use crate::provider::{MediaItem, MediaKind};
 use crate::streaming;
 
@@ -61,9 +62,9 @@ pub async fn upload_and_send_single(
     status_id: i32,
     reply_to_msg_id: Option<i32>,
     item: MediaItem,
-    caption: String,
-    dump_caption: String,
+    caption_opts: CaptionOptions<'_>,
     cache_key: &str,
+    start_time: std::time::Instant,
     state: &Arc<AppState>,
 ) -> anyhow::Result<Vec<Media>> {
     let _ = client
@@ -110,16 +111,18 @@ pub async fn upload_and_send_single(
         }
     };
 
-    let dump_msg = streaming::build_media_message(&dump_caption, &meta, uploaded.clone(), thumb.clone());
-    let media_msg = streaming::build_media_message(&caption, &meta, uploaded.clone(), thumb);
-    let mut sent_medias = Vec::new();
-
     let dump_peer = state.dump_manager.get_peer(client).await.ok().flatten();
     let mut dumped_msg_id = None;
     let mut dumped_media = None;
 
     if let Some(dump_p) = dump_peer {
-        let dump_upload = dump_msg.clone();
+        let dump_hash = crate::cache::compute_cache_hash(cache_key);
+        let mut dump_opts = caption_opts.clone();
+        dump_opts.media_hash = Some(&dump_hash);
+        dump_opts.sender_name = None;
+        dump_opts.elapsed = start_time.elapsed();
+        let dump_caption = build_media_caption(dump_opts);
+        let dump_upload = streaming::build_media_message(&dump_caption, &meta, uploaded.clone(), thumb.clone());
         match client.send_message(dump_p, dump_upload).await {
             Ok(msg) => {
                 if let Some(m) = msg.media() {
@@ -132,6 +135,12 @@ pub async fn upload_and_send_single(
             }
         }
     }
+
+    let mut user_opts = caption_opts;
+    user_opts.media_hash = None;
+    user_opts.elapsed = start_time.elapsed();
+    let user_caption = build_media_caption(user_opts);
+    let mut sent_medias = Vec::new();
 
     if let (Some(msg_id), Some(media), Some(dump_p)) = (dumped_msg_id, dumped_media, dump_peer) {
         let record = crate::cache::DumpRecord {
@@ -157,7 +166,7 @@ pub async fn upload_and_send_single(
         let _ = state.dump_cdn.insert(&record).await;
 
         let user_msg = InputMessage::new()
-            .html(&caption)
+            .html(&user_caption)
             .copy_media(&media)
             .reply_to(reply_to_msg_id);
 
@@ -171,6 +180,7 @@ pub async fn upload_and_send_single(
             }
             Err(e) => {
                 tracing::warn!(error = %e, "copy_media to user failed, retrying raw send");
+                let media_msg = streaming::build_media_message(&user_caption, &meta, uploaded.clone(), thumb.clone());
                 if let Ok(msg) = send_with_flood_retry(|| {
                     client.send_message(chat, media_msg.clone().reply_to(reply_to_msg_id))
                 })
@@ -182,6 +192,7 @@ pub async fn upload_and_send_single(
             }
         }
     } else {
+        let media_msg = streaming::build_media_message(&user_caption, &meta, uploaded.clone(), thumb.clone());
         match send_with_flood_retry(|| {
             client.send_message(chat, media_msg.clone().reply_to(reply_to_msg_id))
         })
@@ -195,7 +206,7 @@ pub async fn upload_and_send_single(
             Err(e) => {
                 tracing::warn!("failed to send media as photo/video: {e:#}, retrying as document");
                 let doc_msg = InputMessage::new()
-                    .html(&caption)
+                    .html(&user_caption)
                     .document(uploaded);
                 match send_with_flood_retry(|| {
                     client.send_message(chat, doc_msg.clone().reply_to(reply_to_msg_id))
@@ -232,9 +243,9 @@ pub async fn upload_and_send_batches(
     status_id: i32,
     reply_to_msg_id: Option<i32>,
     items: Vec<MediaItem>,
-    mut caption_to_send: Option<String>,
-    mut dump_caption_to_send: Option<String>,
+    mut caption_opts: Option<CaptionOptions<'_>>,
     cache_key: &str,
+    start_time: std::time::Instant,
     state: &Arc<AppState>,
 ) -> anyhow::Result<(Vec<Media>, Option<String>)> {
     const ALBUM_MAX: usize = 10;
@@ -323,12 +334,24 @@ pub async fn upload_and_send_batches(
         if batch_uploads.len() == 1 {
             let (uploaded, thumb, meta) = batch_uploads.into_iter().next().unwrap();
             let c = if is_last_batch {
-                caption_to_send.take().unwrap_or_default()
+                caption_opts.as_ref().map(|opts| {
+                    let mut u = opts.clone();
+                    u.media_hash = None;
+                    u.elapsed = start_time.elapsed();
+                    build_media_caption(u)
+                }).unwrap_or_default()
             } else {
                 String::new()
             };
             let dc = if is_last_batch {
-                dump_caption_to_send.take().unwrap_or_default()
+                caption_opts.as_ref().map(|opts| {
+                    let dump_hash = crate::cache::compute_cache_hash(cache_key);
+                    let mut d = opts.clone();
+                    d.media_hash = Some(&dump_hash);
+                    d.sender_name = None;
+                    d.elapsed = start_time.elapsed();
+                    build_media_caption(d)
+                }).unwrap_or_default()
             } else {
                 String::new()
             };
@@ -356,6 +379,9 @@ pub async fn upload_and_send_batches(
                     } else {
                         sent_medias.push(media);
                     }
+                    if is_last_batch {
+                        caption_opts = None;
+                    }
                 }
             } else {
                 match client
@@ -365,6 +391,9 @@ pub async fn upload_and_send_batches(
                     Ok(msg) => {
                         if let Some(m) = msg.media() {
                             sent_medias.push(m);
+                        }
+                        if is_last_batch {
+                            caption_opts = None;
                         }
                     }
                     Err(e) => {
@@ -378,6 +407,9 @@ pub async fn upload_and_send_batches(
                             && let Some(m) = msg.media()
                         {
                             sent_medias.push(m);
+                            if is_last_batch {
+                                caption_opts = None;
+                            }
                         }
                     }
                 }
@@ -397,23 +429,6 @@ pub async fn upload_and_send_batches(
 
             let mut album_sent = false;
             if album_items.len() >= 2 {
-                let medias: Vec<_> = album_items
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (uploaded, thumb, meta))| {
-                        let c = if i == 0 && is_last_batch && other_items.is_empty() {
-                            caption_to_send.clone().unwrap_or_default()
-                        } else {
-                            String::new()
-                        };
-                        let mut input = streaming::build_media_input(&c, meta, uploaded.clone(), thumb.clone());
-                        if i == 0 {
-                            input = input.reply_to(reply_to_msg_id);
-                        }
-                        input
-                    })
-                    .collect();
-
                 let mut dump_album_success = false;
                 if let Some(dump_p) = dump_peer {
                     // Send to dump channel first
@@ -422,7 +437,14 @@ pub async fn upload_and_send_batches(
                         .enumerate()
                         .map(|(i, (uploaded, thumb, meta))| {
                             let c = if i == 0 && is_last_batch && other_items.is_empty() {
-                                dump_caption_to_send.clone().unwrap_or_default()
+                                caption_opts.as_ref().map(|opts| {
+                                    let dump_hash = crate::cache::compute_cache_hash(cache_key);
+                                    let mut d = opts.clone();
+                                    d.media_hash = Some(&dump_hash);
+                                    d.sender_name = None;
+                                    d.elapsed = start_time.elapsed();
+                                    build_media_caption(d)
+                                }).unwrap_or_default()
                             } else {
                                 String::new()
                             };
@@ -442,8 +464,12 @@ pub async fn upload_and_send_batches(
                                         grammers_client::media::InputMedia::new().copy_media(&m);
                                     if idx == 0 {
                                         if is_last_batch && other_items.is_empty() {
-                                            if let Some(ref c) = caption_to_send {
-                                                input_media = input_media.html(c);
+                                            if let Some(ref opts) = caption_opts {
+                                                let mut u = opts.clone();
+                                                u.media_hash = None;
+                                                u.elapsed = start_time.elapsed();
+                                                let c = build_media_caption(u);
+                                                input_media = input_media.html(&c);
                                             }
                                         }
                                         input_media = input_media.reply_to(reply_to_msg_id);
@@ -457,8 +483,7 @@ pub async fn upload_and_send_batches(
                             if client.send_album(chat, user_album).await.is_ok() {
                                 album_sent = true;
                                 if is_last_batch && other_items.is_empty() {
-                                    caption_to_send = None;
-                                    dump_caption_to_send = None;
+                                    caption_opts = None;
                                 }
                             }
                         }
@@ -466,12 +491,29 @@ pub async fn upload_and_send_batches(
                 }
 
                 if !dump_album_success {
-                    match client.send_album(chat, medias).await {
+                    let mut medias_with_cap = Vec::new();
+                    for (i, (uploaded, thumb, meta)) in album_items.iter().enumerate() {
+                        let c = if i == 0 && is_last_batch && other_items.is_empty() {
+                            caption_opts.as_ref().map(|opts| {
+                                let mut u = opts.clone();
+                                u.media_hash = None;
+                                u.elapsed = start_time.elapsed();
+                                build_media_caption(u)
+                            }).unwrap_or_default()
+                        } else {
+                            String::new()
+                        };
+                        let mut input = streaming::build_media_input(&c, meta, uploaded.clone(), thumb.clone());
+                        if i == 0 {
+                            input = input.reply_to(reply_to_msg_id);
+                        }
+                        medias_with_cap.push(input);
+                    }
+                    match client.send_album(chat, medias_with_cap).await {
                         Ok(msgs) => {
                             album_sent = true;
                             if is_last_batch && other_items.is_empty() {
-                                caption_to_send = None;
-                                dump_caption_to_send = None;
+                                caption_opts = None;
                             }
                             for msg_opt in msgs {
                                 if let Some(msg) = msg_opt
@@ -490,8 +532,12 @@ pub async fn upload_and_send_batches(
 
             if !album_sent {
                 for (uploaded, thumb, meta) in album_items {
-                    let c = if is_last_batch && caption_to_send.is_some() && other_items.is_empty() {
-                        caption_to_send.take().unwrap_or_default()
+                    let c = if is_last_batch && caption_opts.is_some() && other_items.is_empty() {
+                        caption_opts.take().map(|mut opts| {
+                            opts.media_hash = None;
+                            opts.elapsed = start_time.elapsed();
+                            build_media_caption(opts)
+                        }).unwrap_or_default()
                     } else {
                         String::new()
                     };
@@ -523,8 +569,12 @@ pub async fn upload_and_send_batches(
             }
 
             for (uploaded, _thumb, _meta) in other_items {
-                let c = if is_last_batch && caption_to_send.is_some() {
-                    caption_to_send.take().unwrap_or_default()
+                let c = if is_last_batch && caption_opts.is_some() {
+                    caption_opts.take().map(|mut opts| {
+                        opts.media_hash = None;
+                        opts.elapsed = start_time.elapsed();
+                        build_media_caption(opts)
+                    }).unwrap_or_default()
                 } else {
                     String::new()
                 };
@@ -560,5 +610,10 @@ pub async fn upload_and_send_batches(
         let _ = state.dump_cdn.insert(&record).await;
     }
 
-    Ok((sent_medias, caption_to_send))
+    let caption_remainder = caption_opts.map(|mut opts| {
+        opts.media_hash = None;
+        opts.elapsed = start_time.elapsed();
+        build_media_caption(opts)
+    });
+    Ok((sent_medias, caption_remainder))
 }

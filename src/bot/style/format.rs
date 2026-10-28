@@ -1,11 +1,16 @@
 use std::time::Duration;
 
 pub fn format_duration(dur: Duration) -> String {
-    let secs = dur.as_secs_f64();
-    if secs < 1.0 {
-        format!("{:.0} ms", dur.as_millis())
-    } else if secs < 60.0 {
-        format!("{secs:.2}s")
+    let ms = dur.as_millis();
+    if ms < 1000 {
+        format!("{ms} ms")
+    } else if dur.as_secs() < 60 {
+        let secs = dur.as_secs_f64();
+        if (secs.fract() * 100.0).round() == 0.0 {
+            format!("{:.0}s", secs)
+        } else {
+            format!("{secs:.2}s")
+        }
     } else {
         let mins = dur.as_secs() / 60;
         let rem_secs = dur.as_secs() % 60;

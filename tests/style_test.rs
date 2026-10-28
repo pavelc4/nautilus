@@ -25,7 +25,7 @@ fn test_format_bytes() {
 
 #[test]
 fn test_detect_platform_and_source_link() {
-    assert_eq!(detect_platform("https://x.com/user/status/123"), Some("Twitter/X"));
+    assert_eq!(detect_platform("https://x.com/user/status/123"), Some("X"));
     assert_eq!(detect_platform("https://pixiv.net/en/artworks/123"), Some("Pixiv"));
     assert_eq!(detect_platform("https://instagram.com/p/123"), Some("Instagram"));
 
@@ -52,11 +52,12 @@ fn test_build_media_caption() {
 
     assert!(caption.contains("<b>My Art &amp; Title</b>"));
     assert!(caption.contains("<blockquote>"));
-    assert!(caption.contains("🔗 Source: <a href=\"https://pixiv.net/en/artworks/123\">Pixiv</a>"));
-    assert!(caption.contains("🏷 Type: ZIP Archive"));
-    assert!(caption.contains("💾 Size: 5.00 MB"));
-    assert!(caption.contains("⏱️ Process Time: 1.20s (cached)"));
-    assert!(caption.contains("🔑 Hash: <code>7a8f9c0e1b2d3e4f</code>"));
-    assert!(caption.contains("👤 By: <a href=\"https://t.me/Alice\">Alice</a>"));
+    assert!(caption.contains("📎 <b>Source:</b> <a href=\"https://pixiv.net/en/artworks/123\">Pixiv</a>"));
+    assert!(caption.contains("📄 <b>Type:</b> ZIP Archive"));
+    assert!(caption.contains("📁 <b>Size:</b> 5.00 MB"));
+    assert!(caption.contains("⏱ <b>Process Time:</b> 1.20s (<code>cached</code>)"));
+    assert!(caption.contains("🔑 <b>Hash:</b> <code>7a8f9c0e1b2d3e4f</code>"));
+    assert!(caption.contains("👤 <b>By:</b> <a href=\"https://t.me/Alice\">Alice</a>"));
     assert!(caption.contains("🤖 Downloaded via @aetherstagingbot"));
+    assert!(caption.contains("💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>"));
 }
