@@ -14,6 +14,7 @@ pub mod url;
 pub use cache::*;
 pub use uploader::*;
 pub use url::*;
+pub use crate::bot::style::format_duration as format_process_duration;
 
 pub async fn handle_dl(
     client: &Client,

@@ -1,3 +1,5 @@
+pub use super::stream::{detect_image_dimensions, parse_dimensions};
+
 pub fn parse_quality(quality: &str, label: &str) -> u32 {
     let score = |s: &str| {
         let clean: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
