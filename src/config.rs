@@ -11,12 +11,28 @@ pub struct Config {
     pub max_file_size_mb: Option<u64>,
     pub progress_edit_secs: Option<u64>,
     pub worker_concurrency: Option<usize>,
+
+    pub dump_channel: Option<String>,
+    pub dump_channel_id: Option<i64>,
 }
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
         Ok(envy::from_env::<Config>()?)
+    }
+
+    pub fn dump_channel_target(&self) -> Option<String> {
+        if let Some(ref ch) = self.dump_channel {
+            let trimmed = ch.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        if let Some(id) = self.dump_channel_id {
+            return Some(id.to_string());
+        }
+        None
     }
 
     pub fn max_file_size_bytes(&self) -> u64 {

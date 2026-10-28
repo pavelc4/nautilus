@@ -64,7 +64,29 @@ pub async fn handle_dl(
         .await;
     }
 
-    // 2. In-flight request deduplication: if identical URL is currently downloading, wait for it
+    // 2. Persistent Dump CDN cache hit (0 Astra scraping, 0 bandwidth!)
+    if let Ok(Some(dump_peer)) = state.dump_manager.get_peer(client).await
+        && let Ok(Some(record)) = state.dump_cdn.get(&cache_key).await
+        && send_dump_cdn_cached_media(
+            client,
+            DumpCdnContext {
+                chat,
+                dump_peer,
+                status_id,
+                reply_to_msg_id,
+                url: &url,
+                record: &record,
+                sender_name: sender_name.as_deref(),
+                start_time,
+            },
+            state,
+        )
+        .await?
+    {
+        return Ok(());
+    }
+
+    // 3. In-flight request deduplication: if identical URL is currently downloading, wait for it
     let flight_leader = match state.singleflight.wait_or_lead(&cache_key).await {
         Ok(crate::pool::FlightStatus::Leader(leader)) => Some(leader),
         Ok(crate::pool::FlightStatus::Follower(())) => {
@@ -86,6 +108,26 @@ pub async fn handle_dl(
                     state,
                 )
                 .await;
+            }
+            if let Ok(Some(dump_peer)) = state.dump_manager.get_peer(client).await
+                && let Ok(Some(record)) = state.dump_cdn.get(&cache_key).await
+                && send_dump_cdn_cached_media(
+                    client,
+                    DumpCdnContext {
+                        chat,
+                        dump_peer,
+                        status_id,
+                        reply_to_msg_id,
+                        url: &url,
+                        record: &record,
+                        sender_name: sender_name.as_deref(),
+                        start_time,
+                    },
+                    state,
+                )
+                .await?
+            {
+                return Ok(());
             }
             None
         }
@@ -213,6 +255,7 @@ pub async fn handle_dl(
             reply_to_msg_id,
             item,
             caption,
+            &cache_key,
             state,
         )
         .await?;
@@ -225,6 +268,7 @@ pub async fn handle_dl(
             reply_to_msg_id,
             items,
             Some(caption),
+            &cache_key,
             state,
         )
         .await?

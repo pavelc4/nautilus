@@ -25,6 +25,8 @@ pub struct AppState {
     pub singleflight: Arc<crate::pool::SingleFlight<()>>,
     pub pending_downloads: Arc<dashmap::DashMap<String, String>>,
     pub media_cache: Arc<crate::cache::BoundedCache<String, CachedMedia>>,
+    pub dump_cdn: Arc<crate::cache::DumpCdnCache>,
+    pub dump_manager: Arc<crate::cache::DumpChannelManager>,
     /// Shared HTTP client for lightweight diagnostic calls (/check, /status, /speedtest).
     /// Per-call timeouts are applied per-request via `.timeout(..)` on the builder, so a
     /// single connection pool + TLS state is reused instead of rebuilt on every command.
@@ -75,6 +77,20 @@ impl AppState {
             std::time::Duration::from_secs(24 * 3600),
         ));
 
+        let cdn_path =
+            std::env::var("DATA_DIR").unwrap_or_else(|_| "data".into()) + "/dump_cdn.sqlite";
+        let dump_cdn = Arc::new(crate::cache::DumpCdnCache::open(&cdn_path).await?);
+        let dump_manager =
+            Arc::new(crate::cache::DumpChannelManager::new(config.dump_channel_target()));
+
+        if dump_manager.is_enabled() {
+            let dm = dump_manager.clone();
+            let cl = session.client.clone();
+            tokio::spawn(async move {
+                let _ = dm.get_peer(&cl).await;
+            });
+        }
+
         let state = Arc::new(Self {
             client: session.client,
             config,
@@ -84,6 +100,8 @@ impl AppState {
             singleflight: Arc::new(crate::pool::SingleFlight::new()),
             pending_downloads: Arc::new(dashmap::DashMap::new()),
             media_cache,
+            dump_cdn,
+            dump_manager,
             http,
             topic_settings,
         });

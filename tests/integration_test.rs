@@ -36,11 +36,42 @@ fn test_config_methods_and_defaults() {
         max_file_size_mb: None,
         progress_edit_secs: None,
         worker_concurrency: None,
+        dump_channel: None,
+        dump_channel_id: None,
     };
 
     assert_eq!(cfg.max_file_size_bytes(), 2000 * 1024 * 1024);
     assert_eq!(cfg.progress_edit_secs(), 3);
     assert!(cfg.worker_concurrency() >= 4);
+    assert_eq!(cfg.dump_channel_target(), None);
+
+    let cfg_with_ch = Config {
+        telegram_app_id: 12345,
+        telegram_app_hash: "hash".to_string(),
+        bot_token: "token".to_string(),
+        owner_id: 999,
+        astra_api_url: None,
+        max_file_size_mb: None,
+        progress_edit_secs: None,
+        worker_concurrency: None,
+        dump_channel: Some(" @my_dump_ch ".to_string()),
+        dump_channel_id: None,
+    };
+    assert_eq!(cfg_with_ch.dump_channel_target(), Some("@my_dump_ch".to_string()));
+
+    let cfg_with_id = Config {
+        telegram_app_id: 12345,
+        telegram_app_hash: "hash".to_string(),
+        bot_token: "token".to_string(),
+        owner_id: 999,
+        astra_api_url: None,
+        max_file_size_mb: None,
+        progress_edit_secs: None,
+        worker_concurrency: None,
+        dump_channel: None,
+        dump_channel_id: Some(-1001234567890),
+    };
+    assert_eq!(cfg_with_id.dump_channel_target(), Some("-1001234567890".to_string()));
 }
 
 #[test]
@@ -269,4 +300,48 @@ async fn test_pixiv_streaming_photos_live_local() {
             eprintln!("Skipping live local pixiv streaming test (server unreachable): {e}");
         }
     }
+}
+
+#[tokio::test]
+async fn test_dump_cdn_cache_crud() {
+    use nautilus::cache::{DumpCdnCache, DumpRecord};
+
+    let temp_dir = std::env::temp_dir().join(format!("test_cdn_{}", rand::random::<u32>()));
+    let db_path = temp_dir.join("dump_cdn.sqlite");
+
+    let cache = DumpCdnCache::open(db_path.to_str().unwrap()).await.unwrap();
+
+    let record = DumpRecord {
+        cache_key: "https://x.com/user/status/123#mp4".to_string(),
+        channel_id: -1001234567890,
+        message_ids: vec![42, 43],
+        kind: "video".to_string(),
+        title: Some("Viral Tweet Video".to_string()),
+        description: Some("Funny caption".to_string()),
+        total_bytes: 1048576,
+        dims: Some((1920, 1080)),
+        duration_secs: Some(15),
+        created_at: 1700000000,
+    };
+
+    // Insert
+    cache.insert(&record).await.unwrap();
+
+    // Get
+    let fetched = cache.get(&record.cache_key).await.unwrap().expect("record should exist");
+    assert_eq!(fetched.cache_key, record.cache_key);
+    assert_eq!(fetched.channel_id, -1001234567890);
+    assert_eq!(fetched.message_ids, vec![42, 43]);
+    assert_eq!(fetched.kind, "video");
+    assert_eq!(fetched.title.as_deref(), Some("Viral Tweet Video"));
+    assert_eq!(fetched.dims, Some((1920, 1080)));
+    assert_eq!(fetched.total_bytes, 1048576);
+    assert_eq!(fetched.duration_secs, Some(15));
+
+    // Delete
+    cache.delete(&record.cache_key).await.unwrap();
+    let after_delete = cache.get(&record.cache_key).await.unwrap();
+    assert!(after_delete.is_none());
+
+    let _ = std::fs::remove_dir_all(temp_dir);
 }

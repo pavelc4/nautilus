@@ -59,7 +59,12 @@ pub async fn run(
 async fn handle_update(state: &Arc<AppState>, update: Update) -> anyhow::Result<()> {
     match update {
         Update::NewMessage(msg) if msg.outgoing() => Ok(()),
-        Update::NewMessage(msg) => message::handle_message(state, msg).await,
+        Update::NewMessage(msg) => {
+            if let Ok(Some(peer_ref)) = msg.peer_ref().await {
+                state.dump_manager.observe_peer(peer_ref).await;
+            }
+            message::handle_message(state, msg).await
+        }
         Update::CallbackQuery(query) => callback::handle_callback_query(state, query).await,
         _ => Ok(()),
     }

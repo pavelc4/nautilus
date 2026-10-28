@@ -106,6 +106,7 @@ pub async fn send_cached_media(
         if let Some(im) = media.to_raw_input_media() {
             let msg = InputMessage::new()
                 .html(caption)
+                .invert_media(true)
                 .media(im)
                 .reply_to(reply_to_msg_id);
             if client.send_message(chat, msg).await.is_ok() {
@@ -132,4 +133,145 @@ pub async fn send_cached_media(
         state.bot_stats.record_success();
     }
     Ok(())
+}
+
+pub struct DumpCdnContext<'a> {
+    pub chat: PeerRef,
+    pub dump_peer: PeerRef,
+    pub status_id: i32,
+    pub reply_to_msg_id: Option<i32>,
+    pub url: &'a str,
+    pub record: &'a crate::cache::DumpRecord,
+    pub sender_name: Option<&'a str>,
+    pub start_time: std::time::Instant,
+}
+
+pub async fn send_dump_cdn_cached_media(
+    client: &Client,
+    ctx: DumpCdnContext<'_>,
+    state: &Arc<AppState>,
+) -> anyhow::Result<bool> {
+    let DumpCdnContext {
+        chat,
+        dump_peer,
+        status_id,
+        reply_to_msg_id,
+        url,
+        record,
+        sender_name,
+        start_time,
+    } = ctx;
+
+    tracing::info!(
+        url,
+        message_ids = ?record.message_ids,
+        "dump CDN cache hit! Fetching from storage channel"
+    );
+    state.bot_stats.record_cache_hit();
+
+    let _ = client
+        .edit_message(
+            chat,
+            status_id,
+            InputMessage::new().text("Fetching from CDN storage..."),
+        )
+        .await;
+
+    let fetched = match client.get_messages_by_id(dump_peer, &record.message_ids).await {
+        Ok(msgs) => msgs,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to query dump channel messages");
+            return Ok(false);
+        }
+    };
+
+    let mut valid_medias = Vec::new();
+    for msg_opt in fetched {
+        match msg_opt.and_then(|m| m.media()) {
+            Some(media) => valid_medias.push(media),
+            None => {
+                tracing::warn!(
+                    url,
+                    "cached message in dump channel was deleted or has no media, purging record"
+                );
+                let _ = state.dump_cdn.delete(&record.cache_key).await;
+                return Ok(false);
+            }
+        }
+    }
+
+    if valid_medias.is_empty() {
+        return Ok(false);
+    }
+
+    let type_str = match record.kind.as_str() {
+        "video" => "Video",
+        "photo" => "Photo",
+        "audio" => "Audio",
+        "zip" => "ZIP Archive",
+        _ => "Media",
+    };
+
+    let caption = build_media_caption(CaptionOptions {
+        title: record.title.as_deref(),
+        description: record.description.as_deref(),
+        source_url: url,
+        type_str,
+        resolution: record.dims,
+        total_bytes: record.total_bytes,
+        duration: record.duration_secs.map(std::time::Duration::from_secs),
+        elapsed: start_time.elapsed(),
+        cache_label: Some("cdn cache"),
+        sender_name,
+    });
+
+    let mut sent_any = false;
+    if valid_medias.len() == 1 {
+        let media = &valid_medias[0];
+        let msg = InputMessage::new()
+            .html(caption)
+            .invert_media(true)
+            .copy_media(media)
+            .reply_to(reply_to_msg_id);
+        if client.send_message(chat, msg).await.is_ok() {
+            sent_any = true;
+        }
+    } else {
+        let mut album_medias = Vec::new();
+        for (idx, media) in valid_medias.iter().enumerate() {
+            let mut input_media =
+                grammers_client::media::InputMedia::new().copy_media(media);
+            if idx == 0 {
+                input_media = input_media.html(&caption).reply_to(reply_to_msg_id);
+            }
+            album_medias.push(input_media);
+        }
+        if client.send_album(chat, album_medias).await.is_ok() {
+            sent_any = true;
+        }
+    }
+
+    if sent_any {
+        let _ = client.delete_messages(chat, &[status_id]).await;
+        state.bot_stats.record_success();
+
+        let kind = match record.kind.as_str() {
+            "photo" => MediaKind::Photo,
+            "audio" => MediaKind::Audio,
+            _ => MediaKind::Video,
+        };
+        state.media_cache.insert(
+            record.cache_key.clone(),
+            crate::app::CachedMedia {
+                medias: valid_medias,
+                title: record.title.clone(),
+                description: record.description.clone(),
+                kind,
+            },
+        );
+
+        return Ok(true);
+    }
+
+    Ok(false)
 }
