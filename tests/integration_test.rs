@@ -78,3 +78,33 @@ fn test_image_dimension_detectors_integration() {
     ];
     assert_eq!(detect_image_dimensions(&png_header), Some((1024, 768)));
 }
+
+#[tokio::test]
+async fn test_astra_twitter_multi_and_mixed_live_local() {
+    use nautilus::provider::astra::AstraProvider;
+    use nautilus::provider::Provider;
+
+    let provider = AstraProvider::new("http://localhost:3000".to_string());
+
+    // 1. Multi-video tweet (3 videos)
+    let multi_url = "https://x.com/ejaaipongg/status/2115271858660765981?a=zfwR6h0VbSPiSfgoVOo&s=19";
+    match provider.resolve(multi_url, None).await {
+        Ok(items) => {
+            assert_eq!(items.len(), 3, "expected 3 videos resolved for multi-video tweet");
+            for item in items {
+                assert_eq!(item.meta.kind, MediaKind::Video);
+            }
+        }
+        Err(e) => {
+            eprintln!("Skipping live local test (server unreachable): {e}");
+            return;
+        }
+    }
+
+    // 2. Mixed photo + video tweet (1 photo, 1 video)
+    let mixed_url = "https://x.com/leedo0804/status/2114891265670365220?a=UrJz2rjGDP9A7LEnbo0&s=20";
+    let items = provider.resolve(mixed_url, None).await.expect("resolve mixed tweet");
+    assert_eq!(items.len(), 2, "expected 2 items (1 photo + 1 video) for mixed tweet");
+    assert!(items.iter().any(|i| i.meta.kind == MediaKind::Photo), "must contain photo");
+    assert!(items.iter().any(|i| i.meta.kind == MediaKind::Video), "must contain video");
+}
