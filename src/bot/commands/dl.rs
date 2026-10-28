@@ -330,13 +330,14 @@ pub async fn handle_dl(
             .await;
 
         let meta = item.meta.clone();
-        let uploaded = match streaming::upload_media(
+        let (uploaded, thumb) = match streaming::upload_media(
             client,
             chat,
             status_id,
             item.meta,
             item.reader,
             &state.config,
+            &state.http,
         )
         .await
         {
@@ -355,7 +356,7 @@ pub async fn handle_dl(
         };
 
         let c = caption_to_send.take().unwrap_or_default();
-        let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone());
+        let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone(), thumb);
         match client
             .send_message(chat, media_msg.reply_to(reply_to_msg_id))
             .await
@@ -425,13 +426,14 @@ pub async fn handle_dl(
                     )
                     .await;
 
-                let uploaded = match streaming::upload_media(
+                let (uploaded, thumb) = match streaming::upload_media(
                     client,
                     chat,
                     status_id,
                     item.meta.clone(),
                     item.reader,
                     &state.config,
+                    &state.http,
                 )
                 .await
                 {
@@ -449,7 +451,7 @@ pub async fn handle_dl(
                     }
                 };
 
-                batch_uploads.push((uploaded, item.meta));
+                batch_uploads.push((uploaded, thumb, item.meta));
             }
 
             let _ = client
@@ -465,13 +467,13 @@ pub async fn handle_dl(
                 .await;
 
             if batch_uploads.len() == 1 {
-                let (uploaded, meta) = batch_uploads.into_iter().next().unwrap();
+                let (uploaded, thumb, meta) = batch_uploads.into_iter().next().unwrap();
                 let c = if is_last_batch {
                     caption_to_send.take().unwrap_or_default()
                 } else {
                     String::new()
                 };
-                let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone());
+                let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone(), thumb);
                 match client
                     .send_message(chat, media_msg.reply_to(reply_to_msg_id))
                     .await
@@ -497,8 +499,8 @@ pub async fn handle_dl(
                 let mut album_items = Vec::new();
                 let mut other_items = Vec::new();
                 for item in batch_uploads {
-                    if (item.1.kind == MediaKind::Photo && streaming::send_as_photo(&item.1))
-                        || item.1.kind == MediaKind::Video
+                    if (item.2.kind == MediaKind::Photo && streaming::send_as_photo(&item.2))
+                        || item.2.kind == MediaKind::Video
                     {
                         album_items.push(item);
                     } else {
@@ -511,13 +513,13 @@ pub async fn handle_dl(
                     let medias: Vec<_> = album_items
                         .iter()
                         .enumerate()
-                        .map(|(i, (uploaded, meta))| {
+                        .map(|(i, (uploaded, thumb, meta))| {
                             let c = if i == 0 && is_last_batch && other_items.is_empty() {
                                 caption_to_send.clone().unwrap_or_default()
                             } else {
                                 String::new()
                             };
-                            let mut input = streaming::build_media_input(&c, meta, uploaded.clone());
+                            let mut input = streaming::build_media_input(&c, meta, uploaded.clone(), thumb.clone());
                             if i == 0 {
                                 input = input.reply_to(reply_to_msg_id);
                             }
@@ -546,13 +548,13 @@ pub async fn handle_dl(
                 }
 
                 if !album_sent {
-                    for (uploaded, meta) in album_items {
+                    for (uploaded, thumb, meta) in album_items {
                         let c = if is_last_batch && caption_to_send.is_some() && other_items.is_empty() {
                             caption_to_send.take().unwrap_or_default()
                         } else {
                             String::new()
                         };
-                        let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone());
+                        let media_msg = streaming::build_media_message(&c, &meta, uploaded.clone(), thumb);
                         match client
                             .send_message(chat, media_msg.reply_to(reply_to_msg_id))
                             .await
@@ -577,7 +579,7 @@ pub async fn handle_dl(
                     }
                 }
 
-                for (uploaded, _meta) in other_items {
+                for (uploaded, _thumb, _meta) in other_items {
                     let c = if is_last_batch && caption_to_send.is_some() {
                         caption_to_send.take().unwrap_or_default()
                     } else {

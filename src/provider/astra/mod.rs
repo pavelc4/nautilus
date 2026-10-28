@@ -74,16 +74,32 @@ impl Provider for AstraProvider {
             None
         };
 
+        let twitter_has_video = platform == "twitter"
+            && data
+                .downloads
+                .as_ref()
+                .map(|dl| dl.iter().any(|d| d.media_type == AstraMediaType::Video))
+                .unwrap_or(false);
+
+        let video_thumb = data.thumbnail.clone().or_else(|| {
+            data.downloads.as_ref().and_then(|dl| {
+                dl.iter()
+                    .find(|d| d.media_type == AstraMediaType::Image)
+                    .map(|d| d.url.clone())
+            })
+        });
+
         let mut items = Vec::new();
 
         let wants_video = format == Some("video")
             || format.is_none()
             || format == Some("both")
             || format == Some("all");
-        let wants_photo = format == Some("photo")
+        let wants_photo = (format == Some("photo")
             || format.is_none()
             || format == Some("both")
-            || format == Some("all");
+            || format == Some("all"))
+            && !twitter_has_video;
 
         // `page:{idx}` downloads only the Nth image/slide in a multi-page artwork.
         let page_index = format.and_then(|f| f.strip_prefix("page:")).and_then(|n| n.parse::<usize>().ok());
@@ -198,6 +214,7 @@ impl Provider for AstraProvider {
                             kind: MediaKind::Video,
                             title: title.clone(),
                             description: description.clone(),
+                            thumbnail_url: video_thumb.clone(),
                         };
                         let media_item = download_item(&self.client, v.url.clone(), meta).await?;
                         items.push(media_item);
@@ -225,6 +242,7 @@ impl Provider for AstraProvider {
                         kind: MediaKind::Photo,
                         title: title.clone(),
                         description: description.clone(),
+                        thumbnail_url: None,
                     };
                     // Skip a photo whose CDN fetch fails (403 on a stale/oversized
                     // variant) rather than aborting the whole slideshow.
@@ -261,6 +279,7 @@ impl Provider for AstraProvider {
                         kind: MediaKind::Audio,
                         title: title.clone(),
                         description: description.clone(),
+                        thumbnail_url: None,
                     };
                     let media_item = download_item(&self.client, a.url.clone(), meta).await?;
                     items.push(media_item);
@@ -320,6 +339,7 @@ impl Provider for AstraProvider {
                     kind,
                     title: if idx == 0 { title.clone() } else { None },
                     description: if idx == 0 { description.clone() } else { None },
+                    thumbnail_url: if kind == MediaKind::Video { data.thumbnail.clone() } else { None },
                 };
                 // Skip an item whose CDN fetch fails (e.g. FB returns 403 for a
                 // stale/oversized variant) rather than aborting the whole album —
@@ -344,6 +364,7 @@ impl Provider for AstraProvider {
     ) -> anyhow::Result<crate::provider::MediaMetadataInfo> {
         let parsed_url = url::Url::parse(url)?;
         let endpoint = AstraEndpoint::try_from(&parsed_url)?;
+        let platform = endpoint.platform();
 
         let mut api_url = url::Url::parse(&self.api_url)?;
         api_url.set_path(endpoint.path());
@@ -400,6 +421,13 @@ impl Provider for AstraProvider {
             && !videos.is_empty()
         {
             has_video = true;
+        }
+
+        // For Twitter/X, if a tweet contains a video, any photo in downloads is just
+        // the video's preview thumbnail — don't flag has_photo so user isn't prompted
+        // with a bogus "Photo" / "Download All" button.
+        if platform == "twitter" && has_video {
+            has_photo = false;
         }
 
         Ok(crate::provider::MediaMetadataInfo {

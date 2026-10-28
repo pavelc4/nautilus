@@ -11,6 +11,7 @@ pub struct AstraResponse {
 pub struct AstraData {
     pub title: Option<String>,
     pub caption: Option<String>,
+    pub thumbnail: Option<String>,
     pub downloads: Option<Vec<AstraDownloadItem>>,
     pub photos: Option<Vec<AstraPhotoItem>>,
     pub videos: Option<Vec<AstraVideoItem>>,

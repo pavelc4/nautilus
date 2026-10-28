@@ -29,6 +29,7 @@ pub struct MediaMeta {
     pub kind: MediaKind,
     pub title: Option<String>,
     pub description: Option<String>,
+    pub thumbnail_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]

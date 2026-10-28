@@ -38,6 +38,27 @@ pub fn send_as_photo(meta: &MediaMeta) -> bool {
     true
 }
 
+pub async fn upload_thumbnail(
+    client: &Client,
+    http_client: &reqwest::Client,
+    url: &str,
+) -> Option<Uploaded> {
+    let resp = http_client.get(url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let bytes = resp.bytes().await.ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    let len = bytes.len();
+    let mut cursor = std::io::Cursor::new(bytes);
+    client
+        .upload_stream(&mut cursor, len, "thumb.jpg".to_string())
+        .await
+        .ok()
+}
+
 pub async fn upload_media(
     client: &Client,
     chat: PeerRef,
@@ -45,7 +66,16 @@ pub async fn upload_media(
     meta: MediaMeta,
     reader: MediaReader,
     config: &Config,
-) -> anyhow::Result<grammers_client::media::Uploaded> {
+    http_client: &reqwest::Client,
+) -> anyhow::Result<(Uploaded, Option<Uploaded>)> {
+    let thumb_uploaded = if meta.kind == MediaKind::Video
+        && let Some(ref thumb_url) = meta.thumbnail_url
+    {
+        upload_thumbnail(client, http_client, thumb_url).await
+    } else {
+        None
+    };
+
     let (mut progress_reader, byte_counter) = ProgressReader::new(reader);
 
     let size = meta.size as usize;
@@ -150,10 +180,15 @@ pub async fn upload_media(
         handle.abort();
     }
 
-    Ok(uploaded)
+    Ok((uploaded, thumb_uploaded))
 }
 
-pub fn build_media_message(caption: &str, meta: &MediaMeta, uploaded: Uploaded) -> InputMessage {
+pub fn build_media_message(
+    caption: &str,
+    meta: &MediaMeta,
+    uploaded: Uploaded,
+    thumb: Option<Uploaded>,
+) -> InputMessage {
     let mut msg = InputMessage::new().html(caption);
     msg = msg.mime_type(&meta.mime_type);
 
@@ -161,6 +196,9 @@ pub fn build_media_message(caption: &str, meta: &MediaMeta, uploaded: Uploaded) 
         msg = msg.photo(uploaded);
     } else {
         msg = msg.document(uploaded);
+        if let Some(t) = thumb {
+            msg = msg.thumbnail(t);
+        }
     }
 
     if let MediaKind::Video = meta.kind {
@@ -176,7 +214,12 @@ pub fn build_media_message(caption: &str, meta: &MediaMeta, uploaded: Uploaded) 
     msg
 }
 
-pub fn build_media_input(caption: &str, meta: &MediaMeta, uploaded: Uploaded) -> InputMedia {
+pub fn build_media_input(
+    caption: &str,
+    meta: &MediaMeta,
+    uploaded: Uploaded,
+    thumb: Option<Uploaded>,
+) -> InputMedia {
     let mut media = InputMedia::new();
     if !caption.is_empty() {
         media = media.html(caption);
@@ -187,6 +230,9 @@ pub fn build_media_input(caption: &str, meta: &MediaMeta, uploaded: Uploaded) ->
         media = media.photo(uploaded);
     } else {
         media = media.document(uploaded);
+        if let Some(t) = thumb {
+            media = media.thumbnail(t);
+        }
     }
 
     if let MediaKind::Video = meta.kind {
