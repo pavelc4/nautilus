@@ -410,6 +410,13 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
         "-".repeat(10 - cache_filled)
     );
 
+    let cdn_count = state.dump_cdn.count().await.unwrap_or(0);
+    let dump_status = if state.dump_manager.is_enabled() {
+        "Connected"
+    } else {
+        "Disabled"
+    };
+
     let astra_status = query_astra_health(&state.http, astra_url).await;
     let total_workers = stats.total_workers();
     let active_workers = stats.active_workers();
@@ -433,7 +440,8 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
          <b>Metrics:</b>\n\
          ├ <b>Total Downloads:</b> {processed}\n\
          ├ <b>Cache Hits:</b> {cache_hits}\n\
-         └ <b>Cache Ratio:</b> [<code>{}</code>] {:.1}%\n\n\
+         ├ <b>Cache Ratio:</b> [<code>{}</code>] {:.1}%\n\
+         └ <b>CDN Storage:</b> {cdn_count} items ({dump_status})\n\n\
          <b>System Memory & Load:</b>\n\
          ├ <b>CPU:</b> {ncpus} cores @ {cpu_pct:.1}%\n\
          ├ <b>Host RAM:</b> {} / {} ({mem_pct:.1}%)\n\

@@ -17,6 +17,72 @@ pub async fn handle_message(
         })
         .unwrap_or(0i64);
 
+    let hash_query = if text.starts_with("/hash") {
+        text.split_whitespace().nth(1)
+    } else if !text.starts_with('/') {
+        let trimmed = text.trim();
+        if (trimmed.len() == 16 || trimmed.len() == 64)
+            && trimmed.chars().all(|c| c.is_ascii_hexdigit())
+        {
+            Some(trimmed)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    if let Some(hash) = hash_query {
+        let peer = msg.peer().ok_or_else(|| anyhow::anyhow!("no peer"))?;
+        let chat = match peer.to_ref().await.ok().flatten() {
+            Some(c) => c,
+            None => anyhow::bail!("no peer ref"),
+        };
+
+        let status = state
+            .client
+            .send_message(
+                chat,
+                InputMessage::new()
+                    .text("Searching CDN storage by hash...")
+                    .reply_to(Some(msg.id())),
+            )
+            .await?;
+
+        if let Ok(Some(record)) = state.dump_cdn.get_by_hash(hash).await
+            && let Ok(Some(dump_peer)) = state.dump_manager.get_peer(&state.client).await
+            && crate::bot::commands::dl::send_dump_cdn_cached_media(
+                &state.client,
+                crate::bot::commands::dl::DumpCdnContext {
+                    chat,
+                    dump_peer,
+                    status_id: status.id(),
+                    reply_to_msg_id: Some(msg.id()),
+                    url: &record.cache_key,
+                    record: &record,
+                    sender_name: None,
+                    start_time: std::time::Instant::now(),
+                },
+                state,
+            )
+            .await?
+        {
+            return Ok(());
+        }
+
+        let _ = state
+            .client
+            .edit_message(
+                chat,
+                status.id(),
+                InputMessage::new().html(format!(
+                    "❌ <b>Media not found in CDN cache for hash:</b> <code>{hash}</code>"
+                )),
+            )
+            .await;
+        return Ok(());
+    }
+
     if !text.starts_with('/') {
         let whitelisted_url = text.split_whitespace().find(|word| {
             let has_proto = word.starts_with("http://") || word.starts_with("https://");

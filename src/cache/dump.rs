@@ -220,6 +220,16 @@ impl DumpCdnCache {
         .await?;
         Ok(())
     }
+
+    pub async fn count(&self) -> anyhow::Result<i64> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare("SELECT COUNT(*) FROM dump_cdn").await?;
+        let row_opt = stmt.query_row(params![]).await;
+        match row_opt {
+            Ok(row) => Ok(row.get::<i64>(0)?),
+            Err(_) => Ok(0),
+        }
+    }
 }
 
 pub struct DumpChannelManager {

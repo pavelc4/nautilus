@@ -32,6 +32,29 @@ pub fn make_chat_action(
     }
 }
 
+pub async fn send_with_flood_retry<F, Fut, T>(mut f: F) -> Result<T, grammers_mtsender::InvocationError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, grammers_mtsender::InvocationError>>,
+{
+    const MAX_RETRIES: usize = 3;
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match f().await {
+            Ok(v) => return Ok(v),
+            Err(grammers_mtsender::InvocationError::Rpc(ref rpc))
+                if rpc.name == "FLOOD_WAIT" && attempt <= MAX_RETRIES =>
+            {
+                let wait = rpc.value.unwrap_or(3).min(60);
+                tracing::warn!(wait_secs = wait, "Telegram FLOOD_WAIT received, auto-retrying after sleep...");
+                tokio::time::sleep(std::time::Duration::from_secs(wait as u64)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 pub async fn upload_and_send_single(
     client: &Client,
     chat: PeerRef,
@@ -138,7 +161,7 @@ pub async fn upload_and_send_single(
             .copy_media(&media)
             .reply_to(reply_to_msg_id);
 
-        match client.send_message(chat, user_msg).await {
+        match send_with_flood_retry(|| client.send_message(chat, user_msg.clone())).await {
             Ok(msg) => {
                 if let Some(m) = msg.media() {
                     sent_medias.push(m);
@@ -148,9 +171,10 @@ pub async fn upload_and_send_single(
             }
             Err(e) => {
                 tracing::warn!(error = %e, "copy_media to user failed, retrying raw send");
-                if let Ok(msg) = client
-                    .send_message(chat, media_msg.reply_to(reply_to_msg_id))
-                    .await
+                if let Ok(msg) = send_with_flood_retry(|| {
+                    client.send_message(chat, media_msg.clone().reply_to(reply_to_msg_id))
+                })
+                .await
                     && let Some(m) = msg.media()
                 {
                     sent_medias.push(m);
@@ -158,9 +182,10 @@ pub async fn upload_and_send_single(
             }
         }
     } else {
-        match client
-            .send_message(chat, media_msg.reply_to(reply_to_msg_id))
-            .await
+        match send_with_flood_retry(|| {
+            client.send_message(chat, media_msg.clone().reply_to(reply_to_msg_id))
+        })
+        .await
         {
             Ok(msg) => {
                 if let Some(m) = msg.media() {
@@ -173,9 +198,10 @@ pub async fn upload_and_send_single(
                     .html(&caption)
                     .invert_media(true)
                     .document(uploaded);
-                match client
-                    .send_message(chat, doc_msg.reply_to(reply_to_msg_id))
-                    .await
+                match send_with_flood_retry(|| {
+                    client.send_message(chat, doc_msg.clone().reply_to(reply_to_msg_id))
+                })
+                .await
                 {
                     Ok(msg) => {
                         if let Some(m) = msg.media() {
