@@ -77,13 +77,8 @@ impl Provider for AstraProvider {
             None
         };
 
-        let twitter_has_video = platform == "twitter"
-            && (data.result_type.as_deref() == Some("video")
-                || data
-                    .downloads
-                    .as_ref()
-                    .map(|dl| dl.iter().any(|d| d.media_type == AstraMediaType::Video))
-                    .unwrap_or(false));
+        let twitter_is_pure_video = platform == "twitter"
+            && data.result_type.as_deref() == Some("video");
 
         let video_thumb = data.thumbnail.clone().or_else(|| {
             data.downloads.as_ref().and_then(|dl| {
@@ -103,7 +98,7 @@ impl Provider for AstraProvider {
             || format.is_none()
             || format == Some("both")
             || format == Some("all"))
-            && !twitter_has_video;
+            && !twitter_is_pure_video;
 
         // `page:{idx}` downloads only the Nth image/slide in a multi-page artwork.
         let page_index = format.and_then(|f| f.strip_prefix("page:")).and_then(|n| n.parse::<usize>().ok());
@@ -144,84 +139,125 @@ impl Provider for AstraProvider {
                     })
                     .collect();
                 if !video_items.is_empty() {
-                    let selected_video = match platform {
-                        "youtube" => {
-                            let combined_videos: Vec<_> = video_items
-                                .iter()
-                                .filter(|v| {
-                                    let label = v.label.as_deref().unwrap_or("").to_lowercase();
-                                    !label.contains("no audio")
-                                })
-                                .collect();
+                    if platform == "twitter" {
+                        let is_multi = video_items.len() > 1;
+                        for (idx, v) in video_items.into_iter().enumerate() {
+                            let sanitized = sanitize_filename(
+                                title.as_deref().unwrap_or("video"),
+                                "video",
+                            );
+                            let filename = if is_multi {
+                                format!("{sanitized}_{idx}.mp4")
+                            } else {
+                                format!("{sanitized}.mp4")
+                            };
+                            let q = v.quality.as_deref().unwrap_or("");
+                            let l = v.label.as_deref().unwrap_or("");
+                            let dims = parse_dimensions(q, l, false);
+                            let thumb = v.thumbnail.clone().or_else(|| video_thumb.clone());
 
-                            if !combined_videos.is_empty() {
-                                combined_videos
-                                    .into_iter()
-                                    .max_by_key(|v| {
+                            let meta = MediaMeta {
+                                filename,
+                                mime_type: "video/mp4".into(),
+                                size: 0,
+                                duration_secs: None,
+                                dims,
+                                kind: MediaKind::Video,
+                                title: title.clone(),
+                                description: description.clone(),
+                                thumbnail_url: thumb,
+                            };
+                            match download_item(&self.client, v.url.clone(), meta).await {
+                                Ok(media_item) => items.push(media_item),
+                                Err(e) => {
+                                    if is_multi {
+                                        tracing::warn!(idx, error = %e, "skipping video in multi-video tweet: download failed");
+                                    } else {
+                                        return Err(e);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        let selected_video = match platform {
+                            "youtube" => {
+                                let combined_videos: Vec<_> = video_items
+                                    .iter()
+                                    .filter(|v| {
+                                        let label = v.label.as_deref().unwrap_or("").to_lowercase();
+                                        !label.contains("no audio")
+                                    })
+                                    .collect();
+
+                                if !combined_videos.is_empty() {
+                                    combined_videos
+                                        .into_iter()
+                                        .max_by_key(|v| {
+                                            let q = v.quality.as_deref().unwrap_or("");
+                                            let l = v.label.as_deref().unwrap_or("");
+                                            parse_quality(q, l)
+                                        })
+                                        .copied()
+                                } else {
+                                    video_items.into_iter().max_by_key(|v| {
                                         let q = v.quality.as_deref().unwrap_or("");
                                         let l = v.label.as_deref().unwrap_or("");
                                         parse_quality(q, l)
                                     })
-                                    .copied()
-                            } else {
-                                video_items.into_iter().max_by_key(|v| {
-                                    let q = v.quality.as_deref().unwrap_or("");
-                                    let l = v.label.as_deref().unwrap_or("");
-                                    parse_quality(q, l)
-                                })
+                                }
                             }
-                        }
-                        "tiktok" => video_items
-                            .iter()
-                            .find(|v| v.label.as_deref() == Some("No Watermark"))
-                            .or_else(|| {
-                                video_items
-                                    .iter()
-                                    .find(|v| v.label.as_deref() == Some("HD"))
-                            })
-                            .or_else(|| {
-                                video_items
-                                    .iter()
-                                    .find(|v| v.label.as_deref() == Some("Original"))
-                            })
-                            .or_else(|| {
-                                video_items
-                                    .iter()
-                                    .find(|v| v.label.as_deref() == Some("With Watermark"))
-                            })
-                            .or_else(|| video_items.first())
-                            .copied(),
-                        _ => video_items.into_iter().max_by_key(|v| {
+                            "tiktok" => video_items
+                                .iter()
+                                .find(|v| v.label.as_deref() == Some("No Watermark"))
+                                .or_else(|| {
+                                    video_items
+                                        .iter()
+                                        .find(|v| v.label.as_deref() == Some("HD"))
+                                })
+                                .or_else(|| {
+                                    video_items
+                                        .iter()
+                                        .find(|v| v.label.as_deref() == Some("Original"))
+                                })
+                                .or_else(|| {
+                                    video_items
+                                        .iter()
+                                        .find(|v| v.label.as_deref() == Some("With Watermark"))
+                                })
+                                .or_else(|| video_items.first())
+                                .copied(),
+                            _ => video_items.into_iter().max_by_key(|v| {
+                                let q = v.quality.as_deref().unwrap_or("");
+                                let l = v.label.as_deref().unwrap_or("");
+                                parse_quality(q, l)
+                            }),
+                        };
+
+                        if let Some(v) = selected_video {
+                            let sanitized =
+                                sanitize_filename(title.as_deref().unwrap_or("video"), "video");
+                            let filename = format!("{sanitized}.mp4");
                             let q = v.quality.as_deref().unwrap_or("");
                             let l = v.label.as_deref().unwrap_or("");
-                            parse_quality(q, l)
-                        }),
-                    };
+                            let is_shorts = url.contains("/shorts/")
+                                || url.contains("/reel/")
+                                || url.contains("tiktok.com");
+                            let dims = parse_dimensions(q, l, is_shorts);
 
-                    if let Some(v) = selected_video {
-                        let sanitized =
-                            sanitize_filename(title.as_deref().unwrap_or("video"), "video");
-                        let filename = format!("{sanitized}.mp4");
-                        let q = v.quality.as_deref().unwrap_or("");
-                        let l = v.label.as_deref().unwrap_or("");
-                        let is_shorts = url.contains("/shorts/")
-                            || url.contains("/reel/")
-                            || url.contains("tiktok.com");
-                        let dims = parse_dimensions(q, l, is_shorts);
-
-                        let meta = MediaMeta {
-                            filename,
-                            mime_type: "video/mp4".into(),
-                            size: 0,
-                            duration_secs: None,
-                            dims,
-                            kind: MediaKind::Video,
-                            title: title.clone(),
-                            description: description.clone(),
-                            thumbnail_url: video_thumb.clone(),
-                        };
-                        let media_item = download_item(&self.client, v.url.clone(), meta).await?;
-                        items.push(media_item);
+                            let meta = MediaMeta {
+                                filename,
+                                mime_type: "video/mp4".into(),
+                                size: 0,
+                                duration_secs: None,
+                                dims,
+                                kind: MediaKind::Video,
+                                title: title.clone(),
+                                description: description.clone(),
+                                thumbnail_url: video_thumb.clone(),
+                            };
+                            let media_item = download_item(&self.client, v.url.clone(), meta).await?;
+                            items.push(media_item);
+                        }
                     }
                 }
             }
@@ -441,8 +477,8 @@ pub fn extract_metadata_info(
 
     // For Twitter/X, if a tweet contains a video, any photo in downloads is just
     // the video's preview thumbnail — don't flag has_photo so user isn't prompted
-    // with a bogus "Photo" / "Download All" button.
-    if platform == "twitter" && has_video {
+    // with a bogus "Photo" / "Download All" button, unless the tweet has multiple/mixed media.
+    if platform == "twitter" && has_video && data.result_type.as_deref() != Some("multiple") {
         has_photo = false;
     }
 

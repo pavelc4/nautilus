@@ -35,6 +35,8 @@ pub struct AstraDownloadItem {
     #[serde(rename = "type")]
     pub media_type: AstraMediaType,
     pub quality: Option<String>,
+    #[serde(default)]
+    pub thumbnail: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
