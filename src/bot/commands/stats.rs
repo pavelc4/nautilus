@@ -271,7 +271,7 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
     // Concurrently measure network latencies
     let tg_fut = async {
         let ping_start = Instant::now();
-        let _ = client.resolve_username("telegram").await;
+        let _ = client.get_me().await;
         ping_start.elapsed().as_micros() as f64 / 1000.0
     };
 

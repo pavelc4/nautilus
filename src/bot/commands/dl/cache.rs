@@ -105,29 +105,43 @@ pub async fn send_cached_media(
     let separate_text = cap_res.separate_text;
 
     let mut sent_any = false;
+    const ALBUM_MAX: usize = 10;
     if cached.medias.len() == 1 {
         let media = &cached.medias[0];
-        if let Some(im) = media.to_raw_input_media() {
-            let msg = InputMessage::new()
-                .html(caption)
-                .media(im)
-                .reply_to(reply_to_msg_id);
-            if client.send_message(chat, msg).await.is_ok() {
-                sent_any = true;
-            }
+        let msg = InputMessage::new()
+            .html(&caption)
+            .copy_media(media)
+            .reply_to(reply_to_msg_id);
+        if client.send_message(chat, msg).await.is_ok() {
+            sent_any = true;
         }
     } else {
-        let mut album_medias = Vec::new();
-        for (idx, media) in cached.medias.iter().enumerate() {
-            let mut input_media =
-                grammers_client::media::InputMedia::new().copy_media(media);
-            if idx == 0 {
-                input_media = input_media.html(&caption).reply_to(reply_to_msg_id);
+        for (batch_idx, chunk) in cached.medias.chunks(ALBUM_MAX).enumerate() {
+            if chunk.len() == 1 {
+                let media = &chunk[0];
+                let mut msg = InputMessage::new()
+                    .copy_media(media)
+                    .reply_to(reply_to_msg_id);
+                if batch_idx == 0 {
+                    msg = msg.html(&caption);
+                }
+                if client.send_message(chat, msg).await.is_ok() {
+                    sent_any = true;
+                }
+            } else {
+                let mut album_medias = Vec::new();
+                for (idx, media) in chunk.iter().enumerate() {
+                    let mut input_media =
+                        grammers_client::media::InputMedia::new().copy_media(media);
+                    if batch_idx == 0 && idx == 0 {
+                        input_media = input_media.html(&caption).reply_to(reply_to_msg_id);
+                    }
+                    album_medias.push(input_media);
+                }
+                if client.send_album(chat, album_medias).await.is_ok() {
+                    sent_any = true;
+                }
             }
-            album_medias.push(input_media);
-        }
-        if client.send_album(chat, album_medias).await.is_ok() {
-            sent_any = true;
         }
     }
 
@@ -142,6 +156,14 @@ pub async fn send_cached_media(
         }
         let _ = client.delete_messages(chat, &[status_id]).await;
         state.bot_stats.record_success();
+    } else {
+        let _ = client
+            .edit_message(
+                chat,
+                status_id,
+                InputMessage::new().text("Failed to deliver cached media."),
+            )
+            .await;
     }
     Ok(())
 }
@@ -241,27 +263,43 @@ pub async fn send_dump_cdn_cached_media(
     let separate_text = cap_res.separate_text;
 
     let mut sent_any = false;
+    const ALBUM_MAX: usize = 10;
     if valid_medias.len() == 1 {
         let media = &valid_medias[0];
         let msg = InputMessage::new()
-            .html(caption)
+            .html(&caption)
             .copy_media(media)
             .reply_to(reply_to_msg_id);
         if client.send_message(chat, msg).await.is_ok() {
             sent_any = true;
         }
     } else {
-        let mut album_medias = Vec::new();
-        for (idx, media) in valid_medias.iter().enumerate() {
-            let mut input_media =
-                grammers_client::media::InputMedia::new().copy_media(media);
-            if idx == 0 {
-                input_media = input_media.html(&caption).reply_to(reply_to_msg_id);
+        for (batch_idx, chunk) in valid_medias.chunks(ALBUM_MAX).enumerate() {
+            if chunk.len() == 1 {
+                let media = &chunk[0];
+                let mut msg = InputMessage::new()
+                    .copy_media(media)
+                    .reply_to(reply_to_msg_id);
+                if batch_idx == 0 {
+                    msg = msg.html(&caption);
+                }
+                if client.send_message(chat, msg).await.is_ok() {
+                    sent_any = true;
+                }
+            } else {
+                let mut album_medias = Vec::new();
+                for (idx, media) in chunk.iter().enumerate() {
+                    let mut input_media =
+                        grammers_client::media::InputMedia::new().copy_media(media);
+                    if batch_idx == 0 && idx == 0 {
+                        input_media = input_media.html(&caption).reply_to(reply_to_msg_id);
+                    }
+                    album_medias.push(input_media);
+                }
+                if client.send_album(chat, album_medias).await.is_ok() {
+                    sent_any = true;
+                }
             }
-            album_medias.push(input_media);
-        }
-        if client.send_album(chat, album_medias).await.is_ok() {
-            sent_any = true;
         }
     }
 
@@ -295,5 +333,12 @@ pub async fn send_dump_cdn_cached_media(
         return Ok(true);
     }
 
+    let _ = client
+        .edit_message(
+            chat,
+            status_id,
+            InputMessage::new().text("Failed to deliver cached media."),
+        )
+        .await;
     Ok(false)
 }
