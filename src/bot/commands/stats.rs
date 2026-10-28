@@ -262,9 +262,55 @@ async fn query_astra_health(client: &reqwest::Client, api_url: &str) -> String {
 pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result<InputMessage> {
     let stats = &state.bot_stats;
 
-    let ping_start = Instant::now();
-    let _ = client.resolve_username("telegram").await?;
-    let ping_ms = ping_start.elapsed().as_micros() as f64 / 1000.0;
+    let astra_url = state
+        .config
+        .astra_api_url
+        .as_deref()
+        .unwrap_or("http://localhost:3000");
+
+    // Concurrently measure network latencies
+    let tg_fut = async {
+        let ping_start = Instant::now();
+        let _ = client.resolve_username("telegram").await;
+        ping_start.elapsed().as_micros() as f64 / 1000.0
+    };
+
+    let astra_ping_fut = async {
+        let ping_start = Instant::now();
+        match state
+            .http
+            .get(format!("{astra_url}/health"))
+            .timeout(Duration::from_millis(2000))
+            .send()
+            .await
+        {
+            Ok(_) => Some(ping_start.elapsed().as_micros() as f64 / 1000.0),
+            Err(_) => None,
+        }
+    };
+
+    let cdn_ping_fut = async {
+        let ping_start = Instant::now();
+        match state
+            .http
+            .get("https://1.1.1.1/cdn-cgi/trace")
+            .timeout(Duration::from_millis(2000))
+            .send()
+            .await
+        {
+            Ok(_) => Some(ping_start.elapsed().as_micros() as f64 / 1000.0),
+            Err(_) => None,
+        }
+    };
+
+    let (ping_ms, astra_ping, cdn_ping) = tokio::join!(tg_fut, astra_ping_fut, cdn_ping_fut);
+    let astra_ping_str = astra_ping
+        .map(|ms| format!("{ms:.1} ms"))
+        .unwrap_or_else(|| "Offline".to_string());
+    let cdn_ping_str = cdn_ping
+        .map(|ms| format!("{ms:.1} ms"))
+        .unwrap_or_else(|| "Unreachable".to_string());
+
     let uptime = stats.uptime();
     let secs = uptime.as_secs();
     let days = secs / 86400;
@@ -281,11 +327,20 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
 
     let proc_self = read_proc("/proc/self/status").await.unwrap_or_default();
     let vm_rss_kb = parse_proc_val(&proc_self, "VmRSS:").unwrap_or(0);
-    let bot_mem_mb = vm_rss_kb as f64 / 1024.0;
+    let vm_hwm_kb = parse_proc_val(&proc_self, "VmHWM:").unwrap_or(0);
+    let vm_size_kb = parse_proc_val(&proc_self, "VmSize:").unwrap_or(0);
+    let vm_data_kb = parse_proc_val(&proc_self, "VmData:").unwrap_or(0);
+
+    let bot_rss_mb = vm_rss_kb as f64 / 1024.0;
+    let bot_hwm_mb = vm_hwm_kb as f64 / 1024.0;
+    let bot_size_mb = vm_size_kb as f64 / 1024.0;
+    let bot_data_mb = vm_data_kb as f64 / 1024.0;
 
     let meminfo = read_proc("/proc/meminfo").await.unwrap_or_default();
     let mem_total_kb = parse_proc_val(&meminfo, "MemTotal:").unwrap_or(1);
-    let mem_avail_kb = parse_proc_val(&meminfo, "MemAvailable:").unwrap_or(0);
+    let mem_free_kb = parse_proc_val(&meminfo, "MemFree:").unwrap_or(0);
+    let mem_avail_kb = parse_proc_val(&meminfo, "MemAvailable:").unwrap_or(mem_free_kb);
+    let mem_cached_kb = parse_proc_val(&meminfo, "Cached:").unwrap_or(0);
     let mem_used_kb = mem_total_kb.saturating_sub(mem_avail_kb);
     let swap_total_kb = parse_proc_val(&meminfo, "SwapTotal:").unwrap_or(0);
     let swap_free_kb = parse_proc_val(&meminfo, "SwapFree:").unwrap_or(0);
@@ -299,6 +354,8 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
 
     let mem_used_mb = mem_used_kb as f64 / 1024.0;
     let mem_total_mb = mem_total_kb as f64 / 1024.0;
+    let mem_avail_mb = mem_avail_kb as f64 / 1024.0;
+    let mem_cached_mb = mem_cached_kb as f64 / 1024.0;
     let mem_pct = mem_used_kb as f64 / mem_total_kb as f64 * 100.0;
     let swap_used_mb = swap_used_kb as f64 / 1024.0;
     let swap_total_mb = swap_total_kb as f64 / 1024.0;
@@ -353,20 +410,20 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
         "-".repeat(10 - cache_filled)
     );
 
-    let astra_url = state
-        .config
-        .astra_api_url
-        .as_deref()
-        .unwrap_or("http://localhost:3000");
     let astra_status = query_astra_health(&state.http, astra_url).await;
     let total_workers = stats.total_workers();
     let active_workers = stats.active_workers();
+    let queued_tasks = state.worker_pool.queued_tasks();
 
     let text = format!(
-        "⚡️ <b>Nautilus Status Dashboard</b> (Ping: {ping_ms:.0}ms)\n\n\
+        "⚡️ <b>Nautilus Status Dashboard</b>\n\n\
+         <b>Network Latency:</b>\n\
+         ├ <b>Telegram MTProto:</b> {ping_ms:.1} ms\n\
+         ├ <b>Astra Backend:</b> {astra_ping_str}\n\
+         └ <b>Public CDN (1.1.1.1):</b> {cdn_ping_str}\n\n\
          <b>Pipeline:</b>\n\
          ├ <b>Health:</b> {}\n\
-         ├ <b>Workers:</b> {active_workers} active / {total_workers} online\n\
+         ├ <b>Workers:</b> {active_workers} active / {total_workers} online (Queued: {queued_tasks})\n\
          ├ <b>Processed:</b> {processed}\n\
          │  ├ <b>OK:</b> {ok}\n\
          │  └ <b>Failed:</b> {fail}\n\
@@ -377,15 +434,17 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
          ├ <b>Total Downloads:</b> {processed}\n\
          ├ <b>Cache Hits:</b> {cache_hits}\n\
          └ <b>Cache Ratio:</b> [<code>{}</code>] {:.1}%\n\n\
-         <b>System:</b>\n\
+         <b>System Memory & Load:</b>\n\
          ├ <b>CPU:</b> {ncpus} cores @ {cpu_pct:.1}%\n\
-         ├ <b>RAM:</b> {} / {} ({mem_pct:.0}%)\n\
+         ├ <b>Host RAM:</b> {} / {} ({mem_pct:.1}%)\n\
+         ├ <b>Host Available:</b> {} (Cached: {})\n\
          ├ <b>{}</b>\n\
          └ <b>Load:</b> {load1} {load5} {load15}\n\n\
-         <b>Bot:</b>\n\
+         <b>Bot Process Memory:</b>\n\
          ├ <b>Username:</b> @{}\n\
-         ├ <b>Memory:</b> {:.2} MB (RSS: {:.2} KB)\n\
-         ├ <b>CPU:</b> {bot_cpu:.1}%\n\
+         ├ <b>Resident Memory (RSS):</b> {bot_rss_mb:.2} MB (Peak HWM: {bot_hwm_mb:.2} MB)\n\
+         ├ <b>Virtual Size (VMS):</b> {bot_size_mb:.2} MB (Data: {bot_data_mb:.2} MB)\n\
+         ├ <b>CPU Usage:</b> {bot_cpu:.1}%\n\
          └ <b>Uptime:</b> {}\n\n\
          <b>Astra Backend:</b>\n\
          {}",
@@ -396,10 +455,10 @@ pub async fn cmd_stats(state: &Arc<AppState>, client: &Client) -> anyhow::Result
         cache_ratio,
         format_memory(mem_used_mb),
         format_memory(mem_total_mb),
+        format_memory(mem_avail_mb),
+        format_memory(mem_cached_mb),
         swap_str,
         stats.bot_username(),
-        bot_mem_mb,
-        vm_rss_kb as f64,
         uptime_str,
         astra_status,
     );

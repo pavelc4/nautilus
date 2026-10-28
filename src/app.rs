@@ -21,6 +21,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub registry: Arc<ProviderRegistry>,
     pub bot_stats: BotStats,
+    pub worker_pool: Arc<crate::pool::WorkerPool>,
     pub pending_downloads: Arc<dashmap::DashMap<String, String>>,
     pub media_cache: Arc<dashmap::DashMap<String, CachedMedia>>,
     /// Shared HTTP client for lightweight diagnostic calls (/check, /status, /speedtest).
@@ -61,14 +62,16 @@ impl AppState {
 
         let topic_settings = crate::bot::topic_settings::TopicSettings::load().await;
 
+        let worker_pool = Arc::new(crate::pool::WorkerPool::new(config.worker_concurrency()));
         let bot_stats = BotStats::new(session.bot_username);
-        bot_stats.set_total_workers(config.worker_concurrency() as u64);
+        bot_stats.set_total_workers(worker_pool.total_slots() as u64);
 
         let state = Arc::new(Self {
             client: session.client,
             config,
             registry,
             bot_stats,
+            worker_pool,
             pending_downloads: Arc::new(dashmap::DashMap::new()),
             media_cache: Arc::new(dashmap::DashMap::new()),
             http,

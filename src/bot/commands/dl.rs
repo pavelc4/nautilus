@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use grammers_client::Client;
 use grammers_client::message::InputMessage;
@@ -45,6 +46,19 @@ fn normalize_url(url: &str) -> String {
     clean.as_str().to_string()
 }
 
+fn format_process_duration(dur: Duration) -> String {
+    let secs = dur.as_secs_f64();
+    if secs < 1.0 {
+        format!("{:.0} ms", dur.as_millis())
+    } else if secs < 60.0 {
+        format!("{secs:.2}s")
+    } else {
+        let mins = dur.as_secs() / 60;
+        let rem_secs = dur.as_secs() % 60;
+        format!("{mins}m {rem_secs}s")
+    }
+}
+
 struct JobGuard {
     state: Arc<AppState>,
 }
@@ -73,6 +87,7 @@ pub async fn handle_dl(
     sender_name: Option<String>,
     reply_to_msg_id: Option<i32>,
 ) -> anyhow::Result<()> {
+    let start_time = std::time::Instant::now();
     let _guard = JobGuard::new(state.clone());
     let url = normalize_url(url);
     let cache_key = match format {
@@ -128,8 +143,8 @@ pub async fn handle_dl(
             let size_mb = (total_size as f64) / (1024.0 * 1024.0);
 
             let mut metadata = String::new();
-            metadata.push_str(&format!("🔗 Sumber: {}\n", get_source_link(&url)));
-            metadata.push_str(&format!("🏷 Tipe: {type_str}\n"));
+            metadata.push_str(&format!("🔗 Source: {}\n", get_source_link(&url)));
+            metadata.push_str(&format!("🏷 Type: {type_str}\n"));
             if cached.kind == MediaKind::Video {
                 let mut dims = None;
                 for m in &cached.medias {
@@ -141,15 +156,17 @@ pub async fn handle_dl(
                     }
                 }
                 if let Some((w, h)) = dims {
-                    metadata.push_str(&format!("📺 Resolusi: {w}x{h}\n"));
+                    metadata.push_str(&format!("📺 Resolution: {w}x{h}\n"));
                 }
             }
-            metadata.push_str(&format!("💾 Ukuran: {:.2} MB\n", size_mb));
+            metadata.push_str(&format!("💾 Size: {:.2} MB\n", size_mb));
+            let elapsed_str = format_process_duration(start_time.elapsed());
+            metadata.push_str(&format!("⏱️ Process Time: {elapsed_str} (cached)\n"));
             if let Some(ref name) = sender_name {
-                metadata.push_str(&format!("👤 Oleh: {name}\n"));
+                metadata.push_str(&format!("👤 By: {name}\n"));
             }
             metadata.push_str(
-                "\n😼 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>",
+                "\n💫 Powered by <a href=\"https://github.com/pavelc4/astra.git\">Astra</a>",
             );
 
             let caption;
@@ -208,6 +225,36 @@ pub async fn handle_dl(
             return Ok(());
         }
     }
+
+    // Acquire worker slot before heavy downstream network operations
+    let client_for_queue = client.clone();
+    let _worker_permit = state
+        .worker_pool
+        .acquire(|queue_pos| {
+            let client = client_for_queue;
+            tokio::spawn(async move {
+                let _ = client
+                    .edit_message(
+                        chat,
+                        status_id,
+                        InputMessage::new().html(format!(
+                            "⏳ <b>All workers are busy</b>\n\
+                             ├ <b>Queue:</b> #{queue_pos}\n\
+                             └ Please wait, your download will start shortly...",
+                        )),
+                    )
+                    .await;
+            });
+        })
+        .await?;
+
+    let _ = client
+        .edit_message(
+            chat,
+            status_id,
+            InputMessage::new().text("Resolving URL via provider chain..."),
+        )
+        .await;
 
     tracing::info!(url, ?format, "resolving URL via provider chain");
     let items = match state.registry.resolve_and_fetch(&url, format).await {
@@ -293,6 +340,8 @@ pub async fn handle_dl(
         metadata.push_str(&format!("📺 Resolution: {w}x{h}\n"));
     }
     metadata.push_str(&format!("📁 Size: {:.2} MB\n", size_mb));
+    let elapsed_str = format_process_duration(start_time.elapsed());
+    metadata.push_str(&format!("⏱️ Process Time: {elapsed_str}\n"));
     if let Some(ref name) = sender_name {
         metadata.push_str(&format!("👤 By: {name}\n"));
     }
@@ -688,4 +737,25 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_process_duration() {
+        assert_eq!(format_process_duration(Duration::from_millis(350)), "350 ms");
+        assert_eq!(format_process_duration(Duration::from_millis(1850)), "1.85s");
+        assert_eq!(format_process_duration(Duration::from_secs(65)), "1m 5s");
+    }
+
+    #[test]
+    fn test_normalize_url_strips_tracking() {
+        let u = "https://x.com/user/status/123?utm_source=twitter&a=1&igshid=abc";
+        let norm = normalize_url(u);
+        assert!(!norm.contains("utm_source"));
+        assert!(!norm.contains("igshid"));
+        assert!(norm.contains("a=1"));
+    }
 }
