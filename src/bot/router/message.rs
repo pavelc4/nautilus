@@ -83,6 +83,8 @@ pub async fn handle_message(
 
                     state.pending_downloads.insert(id.clone(), url.to_string());
 
+                    let is_pixiv = url.contains("pixiv.net") || url.contains("pximg.net");
+
                     let mut buttons = Vec::new();
                     let mut media_row = Vec::new();
 
@@ -99,7 +101,7 @@ pub async fn handle_message(
                             "Photo",
                             format!("dl:photo:{}", id),
                         ));
-                        if info.photo_count > 1 {
+                        if is_pixiv && info.photo_count > 1 {
                             media_row.push(grammers_client::message::Button::data(
                                 "ZIP",
                                 format!("dl:zip:{}", id),
