@@ -1,8 +1,4 @@
-mod app;
-mod bot;
-mod config;
-mod provider;
-mod streaming;
+use nautilus::{app, bot, config};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
